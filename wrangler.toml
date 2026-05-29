@@ -1,0 +1,9 @@
+name = "link-short"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "link-short-db"
+# Replace with your actual database ID after running: npm run db:create
+database_id = "YOUR_DATABASE_ID_HERE"

@@ -1,0 +1,32 @@
+{
+  "name": "link-short",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev:worker": "npm run build && wrangler pages dev dist --compatibility-date=2024-11-01",
+    "db:create": "wrangler d1 create link-short-db",
+    "db:migrate:local": "wrangler d1 execute link-short-db --local --file=schema.sql",
+    "db:migrate": "wrangler d1 execute link-short-db --file=schema.sql",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name=link-short"
+  },
+  "dependencies": {
+    "hono": "^4.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240725.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.4",
+    "wrangler": "^3.65.0"
+  }
+}
