@@ -12,7 +12,15 @@ type Env = {
 }
 
 type Variables = {
-  sessionEmail: string
+  email: string
+}
+
+type LinkRow = {
+  id: number
+  slug: string
+  target_url: string
+  created_at: string
+  updated_at: string
 }
 
 type GoogleTokenResponse = {
@@ -25,74 +33,47 @@ type GoogleUserInfo = {
   verified_email: boolean
 }
 
-type LinkRow = {
-  id: number
-  slug: string
-  target_url: string
-  created_at: string
-  updated_at: string
-}
-
-type SessionRow = {
-  id: string
-  email: string
-}
-
 const RESERVED_SLUGS = new Set(['admin', 'login', 'api', 'favicon.svg', 'assets'])
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Auth Middleware (applied to /api/links/* routes) ─────────────────────────
 
-function getBaseUrl(req: Request): string {
-  const url = new URL(req.url)
-  return `${url.protocol}//${url.host}`
-}
-
-function generateSlug(length = 6): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  const array = new Uint8Array(length)
-  crypto.getRandomValues(array)
-  return Array.from(array, (b) => chars[b % chars.length]).join('')
-}
-
-async function getSession(c: { req: { raw: Request }; env: Env }): Promise<SessionRow | null> {
-  const sessionId = getCookie({ req: c.req, res: new Response() } as never, 'session')
-  if (!sessionId) return null
-  const row = await c.env.DB.prepare(
-    `SELECT id, email FROM sessions WHERE id = ? AND expires_at > datetime('now')`
-  )
-    .bind(sessionId)
-    .first<SessionRow>()
-  return row ?? null
-}
-
-// ─── Auth Middleware ─────────────────────────────────────────────────────────
-
-const requireAuth = async (c: Parameters<typeof app.use>[1] extends (c: infer C, n: infer N) => infer R ? C : never, next: () => Promise<void>) => {
+app.use('/api/links/*', async (c, next) => {
   const sessionId = getCookie(c, 'session')
   if (!sessionId) return c.json({ error: 'Unauthorized' }, 401)
+
   const row = await c.env.DB.prepare(
-    `SELECT id, email FROM sessions WHERE id = ? AND expires_at > datetime('now')`
+    `SELECT email FROM sessions WHERE id = ? AND expires_at > datetime('now')`
   )
     .bind(sessionId)
-    .first<SessionRow>()
+    .first<{ email: string }>()
+
   if (!row) return c.json({ error: 'Unauthorized' }, 401)
-  c.set('sessionEmail', row.email)
+  c.set('email', row.email)
   await next()
-}
-
-// ─── Auth Routes ─────────────────────────────────────────────────────────────
-
-app.get('/api/auth/me', async (c) => {
-  const session = await getSession(c as never)
-  if (!session) return c.json({ user: null })
-  return c.json({ user: { email: session.email } })
 })
 
-app.get('/api/auth/login', async (c) => {
+// ─── Auth Routes ──────────────────────────────────────────────────────────────
+
+app.get('/api/auth/me', async (c) => {
+  const sessionId = getCookie(c, 'session')
+  if (!sessionId) return c.json({ user: null })
+
+  const row = await c.env.DB.prepare(
+    `SELECT email FROM sessions WHERE id = ? AND expires_at > datetime('now')`
+  )
+    .bind(sessionId)
+    .first<{ email: string }>()
+
+  if (!row) return c.json({ user: null })
+  return c.json({ user: { email: row.email } })
+})
+
+app.get('/api/auth/login', (c) => {
   const state = crypto.randomUUID()
-  const redirectUri = `${getBaseUrl(c.req.raw)}/api/auth/callback`
+  const url = new URL(c.req.url)
+  const redirectUri = `${url.protocol}//${url.host}/api/auth/callback`
 
   setCookie(c, 'oauth_state', state, {
     httpOnly: true,
@@ -116,7 +97,6 @@ app.get('/api/auth/login', async (c) => {
 
 app.get('/api/auth/callback', async (c) => {
   const { code, state, error } = c.req.query()
-
   if (error) return c.redirect('/?error=auth_failed')
 
   const storedState = getCookie(c, 'oauth_state')
@@ -126,7 +106,8 @@ app.get('/api/auth/callback', async (c) => {
     return c.redirect('/?error=invalid_state')
   }
 
-  const redirectUri = `${getBaseUrl(c.req.raw)}/api/auth/callback`
+  const reqUrl = new URL(c.req.url)
+  const redirectUri = `${reqUrl.protocol}//${reqUrl.host}/api/auth/callback`
 
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -140,7 +121,6 @@ app.get('/api/auth/callback', async (c) => {
     }),
   })
   const tokens = (await tokenRes.json()) as GoogleTokenResponse
-
   if (!tokens.access_token) return c.redirect('/?error=auth_failed')
 
   const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
@@ -153,7 +133,10 @@ app.get('/api/auth/callback', async (c) => {
   }
 
   const sessionId = crypto.randomUUID()
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '')
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .replace('T', ' ')
+    .slice(0, 19)
 
   await c.env.DB.prepare(
     `INSERT INTO sessions (id, email, expires_at) VALUES (?, ?, ?)`
@@ -181,58 +164,46 @@ app.post('/api/auth/logout', async (c) => {
   return c.json({ ok: true })
 })
 
-// ─── Links API (protected) ────────────────────────────────────────────────────
+// ─── Links API ────────────────────────────────────────────────────────────────
 
-app.get('/api/links', requireAuth, async (c) => {
+app.get('/api/links', async (c) => {
   const { results } = await c.env.DB.prepare(
     'SELECT * FROM links ORDER BY created_at DESC'
   ).all<LinkRow>()
   return c.json({ links: results })
 })
 
-app.post('/api/links', requireAuth, async (c) => {
+app.post('/api/links', async (c) => {
   const body = await c.req.json<{ slug?: string; target_url: string }>()
   let { slug, target_url } = body
 
   if (!target_url?.trim()) {
     return c.json({ error: '目標網址為必填' }, 400)
   }
-
-  try {
-    new URL(target_url)
-  } catch {
-    return c.json({ error: '無效的目標網址' }, 400)
-  }
+  try { new URL(target_url) } catch { return c.json({ error: '無效的目標網址' }, 400) }
 
   if (!slug?.trim()) {
-    // Auto-generate, retry on collision
     for (let i = 0; i < 5; i++) {
-      slug = generateSlug()
-      const existing = await c.env.DB.prepare(
-        'SELECT id FROM links WHERE slug = ?'
-      )
-        .bind(slug)
-        .first()
-      if (!existing) break
+      const candidate = generateSlug()
+      const existing = await c.env.DB.prepare('SELECT id FROM links WHERE slug = ?')
+        .bind(candidate).first()
+      if (!existing) { slug = candidate; break }
     }
   } else {
     slug = slug.trim()
   }
 
-  if (!/^[a-zA-Z0-9_-]+$/.test(slug!)) {
+  if (!slug || !/^[a-zA-Z0-9_-]+$/.test(slug)) {
     return c.json({ error: '短代碼只能包含字母、數字、連字符和底線' }, 400)
   }
-
-  if (RESERVED_SLUGS.has(slug!.toLowerCase())) {
+  if (RESERVED_SLUGS.has(slug.toLowerCase())) {
     return c.json({ error: '此短代碼為保留字，請換一個' }, 400)
   }
 
   try {
     const link = await c.env.DB.prepare(
       `INSERT INTO links (slug, target_url) VALUES (?, ?) RETURNING *`
-    )
-      .bind(slug, target_url.trim())
-      .first<LinkRow>()
+    ).bind(slug, target_url.trim()).first<LinkRow>()
     return c.json({ link }, 201)
   } catch (e) {
     if (e instanceof Error && e.message.includes('UNIQUE')) {
@@ -242,7 +213,7 @@ app.post('/api/links', requireAuth, async (c) => {
   }
 })
 
-app.put('/api/links/:id', requireAuth, async (c) => {
+app.put('/api/links/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json<{ slug?: string; target_url?: string }>()
   const { slug, target_url } = body
@@ -250,22 +221,11 @@ app.put('/api/links/:id', requireAuth, async (c) => {
   if (!slug?.trim() && !target_url?.trim()) {
     return c.json({ error: '沒有要更新的內容' }, 400)
   }
-
-  if (slug?.trim()) {
-    if (!/^[a-zA-Z0-9_-]+$/.test(slug.trim())) {
-      return c.json({ error: '短代碼只能包含字母、數字、連字符和底線' }, 400)
-    }
-    if (RESERVED_SLUGS.has(slug.trim().toLowerCase())) {
-      return c.json({ error: '此短代碼為保留字' }, 400)
-    }
+  if (slug?.trim() && !/^[a-zA-Z0-9_-]+$/.test(slug.trim())) {
+    return c.json({ error: '短代碼只能包含字母、數字、連字符和底線' }, 400)
   }
-
   if (target_url?.trim()) {
-    try {
-      new URL(target_url)
-    } catch {
-      return c.json({ error: '無效的目標網址' }, 400)
-    }
+    try { new URL(target_url) } catch { return c.json({ error: '無效的目標網址' }, 400) }
   }
 
   try {
@@ -274,11 +234,8 @@ app.put('/api/links/:id', requireAuth, async (c) => {
        SET slug       = COALESCE(NULLIF(?, ''), slug),
            target_url = COALESCE(NULLIF(?, ''), target_url),
            updated_at = datetime('now')
-       WHERE id = ?
-       RETURNING *`
-    )
-      .bind(slug?.trim() ?? '', target_url?.trim() ?? '', id)
-      .first<LinkRow>()
+       WHERE id = ? RETURNING *`
+    ).bind(slug?.trim() ?? '', target_url?.trim() ?? '', id).first<LinkRow>()
 
     if (!link) return c.json({ error: '找不到此連結' }, 404)
     return c.json({ link })
@@ -290,13 +247,11 @@ app.put('/api/links/:id', requireAuth, async (c) => {
   }
 })
 
-app.delete('/api/links/:id', requireAuth, async (c) => {
+app.delete('/api/links/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const link = await c.env.DB.prepare(
     'DELETE FROM links WHERE id = ? RETURNING *'
-  )
-    .bind(id)
-    .first<LinkRow>()
+  ).bind(id).first<LinkRow>()
 
   if (!link) return c.json({ error: '找不到此連結' }, 404)
   return c.json({ ok: true })
@@ -309,28 +264,31 @@ app.get('/:slug', async (c) => {
 
   const link = await c.env.DB.prepare(
     'SELECT target_url FROM links WHERE slug = ?'
-  )
-    .bind(slug)
-    .first<Pick<LinkRow, 'target_url'>>()
+  ).bind(slug).first<{ target_url: string }>()
 
-  if (link) {
-    return c.redirect(link.target_url, 301)
-  }
+  if (link) return c.redirect(link.target_url, 301)
 
-  // Unknown slug — serve SPA (handles /admin, /login client-side routes)
+  // Slug not found → serve SPA (handles /admin, /login etc.)
   const url = new URL(c.req.url)
   url.pathname = '/'
   return c.env.ASSETS.fetch(new Request(url.toString(), { headers: c.req.raw.headers }))
 })
 
-// ─── SPA Fallback ────────────────────────────────────────────────────────────
-
-app.get('/', async (c) => c.env.ASSETS.fetch(c.req.raw))
-
-app.all('*', async (c) => {
+// Root & catch-all → serve SPA
+app.get('/', (c) => c.env.ASSETS.fetch(c.req.raw))
+app.all('*', (c) => {
   const url = new URL(c.req.url)
   url.pathname = '/'
   return c.env.ASSETS.fetch(new Request(url.toString(), { headers: c.req.raw.headers }))
 })
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function generateSlug(length = 6): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  const arr = new Uint8Array(length)
+  crypto.getRandomValues(arr)
+  return Array.from(arr, (b) => chars[b % chars.length]).join('')
+}
 
 export const onRequest = handle(app)
