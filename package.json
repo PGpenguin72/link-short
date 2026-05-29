@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build:worker": "esbuild src-worker/index.ts --bundle --outfile=dist/_worker.js --format=esm --platform=browser --target=es2022 --external:node:*",
+    "build": "vite build && npm run build:worker",
     "preview": "vite preview",
     "dev:worker": "npm run build && wrangler pages dev dist --compatibility-date=2024-11-01",
     "db:create": "wrangler d1 create link-short-db",
@@ -27,6 +28,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.5.3",
     "vite": "^5.3.4",
+    "esbuild": "^0.23.0",
     "wrangler": "^3.65.0"
   }
 }
