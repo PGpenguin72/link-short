@@ -22,12 +22,6 @@ type LinkRow = {
 
 const RESERVED = new Set(['admin', 'login', 'api'])
 
-// Show actual error details instead of opaque 500
-app.onError((err, c) => {
-  console.error('[Worker Error]', err)
-  return c.json({ error: err.message, stack: err.stack }, 500)
-})
-
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 // ── Auth middleware ────────────────────────────────────────────────────────────
