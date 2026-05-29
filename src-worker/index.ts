@@ -208,4 +208,8 @@ function randSlug(len = 6) {
   return Array.from(arr, b => chars[b % chars.length]).join('')
 }
 
-export default app
+// Use standard Worker export format — required for Cloudflare Pages _worker.js
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
+    app.fetch(request, env, ctx),
+}
