@@ -6,4 +6,4 @@ pages_build_output_dir = "dist"
 binding = "DB"
 database_name = "link-short-db"
 # Replace with your actual database ID after running: npm run db:create
-database_id = "YOUR_DATABASE_ID_HERE"
+database_id = "96056517-46ea-4fdf-a38b-6544b265d682"
