@@ -5,7 +5,6 @@ import { handle } from 'hono/cloudflare-pages'
 
 type Env = {
   DB: D1Database
-  ASSETS: Fetcher
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   ALLOWED_EMAIL: string
@@ -33,13 +32,13 @@ type GoogleUserInfo = {
   verified_email: boolean
 }
 
-const RESERVED_SLUGS = new Set(['admin', 'login', 'api', 'favicon.svg', 'assets'])
+const RESERVED_SLUGS = new Set(['admin', 'login', 'api'])
 
-const app = new Hono<{ Bindings: Env; Variables: Variables }>()
+const app = new Hono<{ Bindings: Env; Variables: Variables }>().basePath('/api')
 
-// ─── Auth Middleware (applied to /api/links/* routes) ─────────────────────────
+// ─── Auth Middleware ──────────────────────────────────────────────────────────
 
-app.use('/api/links/*', async (c, next) => {
+app.use('/links/*', async (c, next) => {
   const sessionId = getCookie(c, 'session')
   if (!sessionId) return c.json({ error: 'Unauthorized' }, 401)
 
@@ -56,7 +55,7 @@ app.use('/api/links/*', async (c, next) => {
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 
-app.get('/api/auth/me', async (c) => {
+app.get('/auth/me', async (c) => {
   const sessionId = getCookie(c, 'session')
   if (!sessionId) return c.json({ user: null })
 
@@ -66,11 +65,10 @@ app.get('/api/auth/me', async (c) => {
     .bind(sessionId)
     .first<{ email: string }>()
 
-  if (!row) return c.json({ user: null })
-  return c.json({ user: { email: row.email } })
+  return c.json({ user: row ? { email: row.email } : null })
 })
 
-app.get('/api/auth/login', (c) => {
+app.get('/auth/login', (c) => {
   const state = crypto.randomUUID()
   const url = new URL(c.req.url)
   const redirectUri = `${url.protocol}//${url.host}/api/auth/callback`
@@ -95,7 +93,7 @@ app.get('/api/auth/login', (c) => {
   return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
 })
 
-app.get('/api/auth/callback', async (c) => {
+app.get('/auth/callback', async (c) => {
   const { code, state, error } = c.req.query()
   if (error) return c.redirect('/?error=auth_failed')
 
@@ -155,7 +153,7 @@ app.get('/api/auth/callback', async (c) => {
   return c.redirect('/admin')
 })
 
-app.post('/api/auth/logout', async (c) => {
+app.post('/auth/logout', async (c) => {
   const sessionId = getCookie(c, 'session')
   if (sessionId) {
     await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run()
@@ -166,28 +164,26 @@ app.post('/api/auth/logout', async (c) => {
 
 // ─── Links API ────────────────────────────────────────────────────────────────
 
-app.get('/api/links', async (c) => {
+app.get('/links', async (c) => {
   const { results } = await c.env.DB.prepare(
     'SELECT * FROM links ORDER BY created_at DESC'
   ).all<LinkRow>()
   return c.json({ links: results })
 })
 
-app.post('/api/links', async (c) => {
+app.post('/links', async (c) => {
   const body = await c.req.json<{ slug?: string; target_url: string }>()
   let { slug, target_url } = body
 
-  if (!target_url?.trim()) {
-    return c.json({ error: '目標網址為必填' }, 400)
-  }
+  if (!target_url?.trim()) return c.json({ error: '目標網址為必填' }, 400)
   try { new URL(target_url) } catch { return c.json({ error: '無效的目標網址' }, 400) }
 
   if (!slug?.trim()) {
     for (let i = 0; i < 5; i++) {
       const candidate = generateSlug()
-      const existing = await c.env.DB.prepare('SELECT id FROM links WHERE slug = ?')
+      const exists = await c.env.DB.prepare('SELECT id FROM links WHERE slug = ?')
         .bind(candidate).first()
-      if (!existing) { slug = candidate; break }
+      if (!exists) { slug = candidate; break }
     }
   } else {
     slug = slug.trim()
@@ -213,7 +209,7 @@ app.post('/api/links', async (c) => {
   }
 })
 
-app.put('/api/links/:id', async (c) => {
+app.put('/links/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json<{ slug?: string; target_url?: string }>()
   const { slug, target_url } = body
@@ -247,7 +243,7 @@ app.put('/api/links/:id', async (c) => {
   }
 })
 
-app.delete('/api/links/:id', async (c) => {
+app.delete('/links/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const link = await c.env.DB.prepare(
     'DELETE FROM links WHERE id = ? RETURNING *'
@@ -256,33 +252,6 @@ app.delete('/api/links/:id', async (c) => {
   if (!link) return c.json({ error: '找不到此連結' }, 404)
   return c.json({ ok: true })
 })
-
-// ─── Short URL Redirect ───────────────────────────────────────────────────────
-
-app.get('/:slug', async (c) => {
-  const slug = c.req.param('slug')
-
-  const link = await c.env.DB.prepare(
-    'SELECT target_url FROM links WHERE slug = ?'
-  ).bind(slug).first<{ target_url: string }>()
-
-  if (link) return c.redirect(link.target_url, 301)
-
-  // Slug not found → serve SPA (handles /admin, /login etc.)
-  const url = new URL(c.req.url)
-  url.pathname = '/'
-  return c.env.ASSETS.fetch(new Request(url.toString(), { headers: c.req.raw.headers }))
-})
-
-// Root & catch-all → serve SPA
-app.get('/', (c) => c.env.ASSETS.fetch(c.req.raw))
-app.all('*', (c) => {
-  const url = new URL(c.req.url)
-  url.pathname = '/'
-  return c.env.ASSETS.fetch(new Request(url.toString(), { headers: c.req.raw.headers }))
-})
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function generateSlug(length = 6): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
