@@ -22,6 +22,12 @@ type LinkRow = {
 
 const RESERVED = new Set(['admin', 'login', 'api'])
 
+// Show actual error details instead of opaque 500
+app.onError((err, c) => {
+  console.error('[Worker Error]', err)
+  return c.json({ error: err.message, stack: err.stack }, 500)
+})
+
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 // ── Auth middleware ────────────────────────────────────────────────────────────
@@ -70,6 +76,11 @@ app.get('/api/auth/callback', async (c) => {
   const u = new URL(c.req.url)
   const redirect = `${u.protocol}//${u.host}/api/auth/callback`
 
+  // Debug: check env vars are present
+  if (!c.env.GOOGLE_CLIENT_ID) return c.json({ error: 'Missing GOOGLE_CLIENT_ID' }, 500)
+  if (!c.env.GOOGLE_CLIENT_SECRET) return c.json({ error: 'Missing GOOGLE_CLIENT_SECRET' }, 500)
+  if (!c.env.ALLOWED_EMAIL) return c.json({ error: 'Missing ALLOWED_EMAIL' }, 500)
+
   const tr = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -77,13 +88,16 @@ app.get('/api/auth/callback', async (c) => {
       client_secret: c.env.GOOGLE_CLIENT_SECRET, redirect_uri: redirect,
       grant_type: 'authorization_code' }),
   })
-  const tokens = await tr.json() as { access_token?: string }
-  if (!tokens.access_token) return c.redirect('/?error=auth_failed')
+  const tokens = await tr.json() as { access_token?: string; error?: string; error_description?: string }
+  if (!tokens.access_token) return c.json({ error: 'Token exchange failed', detail: tokens }, 500)
 
   const ur = await fetch('https://www.googleapis.com/oauth2/v2/userinfo',
     { headers: { Authorization: `Bearer ${tokens.access_token}` } })
   const info = await ur.json() as { email: string }
   if (info.email !== c.env.ALLOWED_EMAIL) return c.redirect('/?error=unauthorized')
+
+  // Debug: check DB binding
+  if (!c.env.DB) return c.json({ error: 'Missing D1 binding (DB)' }, 500)
 
   const sid = crypto.randomUUID()
   const exp = new Date(Date.now() + 7 * 86400_000).toISOString().replace('T', ' ').slice(0, 19)
