@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: '登入失敗，請再試一次',
-  unauthorized: '此帳號沒有存取權限',
+  banned: '此帳號已被停權',
   invalid_state: '登入流程異常，請再試一次',
 }
 
@@ -19,8 +19,8 @@ export default function LoginPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-white">短網址管理</h1>
-          <p className="text-slate-400 text-sm mt-1">登入以管理您的短網址</p>
+          <h1 className="text-2xl font-bold text-white">短網址服務</h1>
+          <p className="text-slate-400 text-sm mt-1">登入即可建立與管理你的短網址</p>
         </div>
 
         {error && (
@@ -36,6 +36,10 @@ export default function LoginPage() {
           <GoogleIcon />
           使用 Google 帳號登入
         </a>
+
+        <p className="mt-6 text-center text-xs text-slate-600">
+          任何人都可以登入建立短網址
+        </p>
       </div>
     </div>
   )

@@ -8,5 +8,5 @@
     "strict": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["functions"]
+  "include": ["src-worker"]
 }
