@@ -356,7 +356,15 @@ app.put('/api/admin/links/:id', async (c) => {
 })
 
 // ── Short URL redirect ───────────────────────────────────────────────────────
-app.get('/:slug', async (c) => {
+// Root-level public files would otherwise be mistaken for short-link slugs.
+const servePublicAsset = (c: Ctx) => c.env.ASSETS.fetch(c.req.raw)
+app.on(['GET', 'HEAD'], '/favicon.svg', servePublicAsset)
+app.on(['GET', 'HEAD'], '/og-image.svg', servePublicAsset)
+app.on(['GET', 'HEAD'], '/og-image.png', servePublicAsset)
+
+// Social crawlers follow this redirect and use the target page's Open Graph data.
+// HEAD support also lets link unfurlers validate a short URL without downloading HTML.
+app.on(['GET', 'HEAD'], '/:slug', async (c) => {
   const slug = c.req.param('slug')
   if (RESERVED.has(slug)) return serveSPA(c, 200)
 
@@ -370,7 +378,10 @@ app.get('/:slug', async (c) => {
       .first<{ target_url: string; active: number; owner_banned: number }>()
 
     if (row && row.active === 1 && row.owner_banned === 0) {
-      return c.redirect(row.target_url, 301)
+      // Targets are editable, so a permanent redirect would leave browsers and
+      // social platforms stuck on an old destination after an update.
+      c.header('Cache-Control', 'no-store')
+      return c.redirect(row.target_url, 302)
     }
   } catch {
     /* fall through to 404 SPA */

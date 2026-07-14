@@ -10,7 +10,7 @@
     "dev:worker": "npm run build && wrangler pages dev dist --compatibility-date=2024-11-01",
     "db:create": "wrangler d1 create link-short-db",
     "db:migrate:local": "wrangler d1 execute link-short-db --local --file=schema.sql",
-    "db:migrate": "wrangler d1 execute link-short-db --file=schema.sql",
+    "db:migrate": "wrangler d1 execute link-short-db --remote --file=schema.sql",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=link-short"
   },
   "dependencies": {

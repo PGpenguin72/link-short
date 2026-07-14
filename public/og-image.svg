@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">link.pg72.tw 短網址服務</title>
+  <desc id="desc">建立、管理、分享短連結與 QR Code</desc>
+
+  <rect width="1200" height="630" fill="#0f172a" />
+
+  <g opacity="0.18" stroke="#94a3b8" stroke-width="1">
+    <path d="M0 90H1200M0 180H1200M0 270H1200M0 360H1200M0 450H1200M0 540H1200" />
+    <path d="M90 0V630M180 0V630M270 0V630M360 0V630M450 0V630M540 0V630M630 0V630M720 0V630M810 0V630M900 0V630M990 0V630M1080 0V630" />
+  </g>
+
+  <rect x="64" y="62" width="76" height="76" rx="16" fill="#2563eb" />
+  <g transform="translate(82 80)" fill="none" stroke="#ffffff" stroke-width="5">
+    <circle cx="13" cy="31" r="9" />
+    <circle cx="31" cy="13" r="9" />
+    <line x1="19" y1="25" x2="25" y2="19" />
+  </g>
+  <text x="162" y="110" fill="#f8fafc" font-family="Arial, sans-serif" font-size="30" font-weight="700">link.pg72.tw</text>
+
+  <text x="64" y="248" fill="#f8fafc" font-family="Microsoft JhengHei, Heiti TC, sans-serif" font-size="66" font-weight="700">短網址服務</text>
+  <text x="68" y="310" fill="#cbd5e1" font-family="Microsoft JhengHei, Heiti TC, sans-serif" font-size="29">建立、管理、分享，讓網址更短、更清楚。</text>
+
+  <g transform="translate(66 396)">
+    <rect width="176" height="52" rx="8" fill="#172554" stroke="#3b82f6" stroke-width="2" />
+    <circle cx="28" cy="26" r="8" fill="#60a5fa" />
+    <text x="48" y="34" fill="#dbeafe" font-family="Microsoft JhengHei, Heiti TC, sans-serif" font-size="21">自訂短代碼</text>
+  </g>
+  <g transform="translate(258 396)">
+    <rect width="150" height="52" rx="8" fill="#052e2b" stroke="#14b8a6" stroke-width="2" />
+    <rect x="22" y="21" width="12" height="12" fill="#5eead4" />
+    <rect x="25" y="24" width="6" height="6" fill="#052e2b" />
+    <text x="48" y="34" fill="#ccfbf1" font-family="Microsoft JhengHei, Heiti TC, sans-serif" font-size="21">QR Code</text>
+  </g>
+  <g transform="translate(424 396)">
+    <rect width="174" height="52" rx="8" fill="#3b2606" stroke="#f59e0b" stroke-width="2" />
+    <path d="M28 17 V35 M19 26 H37" stroke="#fbbf24" stroke-width="3" stroke-linecap="round" />
+    <text x="50" y="34" fill="#fef3c7" font-family="Microsoft JhengHei, Heiti TC, sans-serif" font-size="21">快速分享</text>
+  </g>
+
+  <g transform="translate(685 92)">
+    <rect width="445" height="446" rx="18" fill="#111827" stroke="#334155" stroke-width="2" />
+    <rect x="28" y="28" width="389" height="58" rx="8" fill="#1e293b" />
+    <circle cx="58" cy="57" r="10" fill="#22c55e" />
+    <text x="82" y="65" fill="#e2e8f0" font-family="Arial, sans-serif" font-size="22">link.pg72.tw/share</text>
+
+    <line x1="222" y1="122" x2="222" y2="192" stroke="#475569" stroke-width="3" />
+    <polygon points="210,179 222,192 234,179" fill="none" stroke="#60a5fa" stroke-width="4" stroke-linejoin="round" />
+
+    <rect x="28" y="220" width="389" height="154" rx="10" fill="#f8fafc" />
+    <rect x="48" y="244" width="105" height="106" rx="7" fill="#dbeafe" />
+    <g transform="translate(73 267) scale(1.35)" fill="none" stroke="#2563eb" stroke-width="4">
+      <circle cx="13" cy="31" r="9" />
+      <circle cx="31" cy="13" r="9" />
+      <line x1="19" y1="25" x2="25" y2="19" />
+    </g>
+    <rect x="177" y="247" width="201" height="16" rx="4" fill="#334155" />
+    <rect x="177" y="280" width="173" height="11" rx="4" fill="#94a3b8" />
+    <rect x="177" y="304" width="201" height="11" rx="4" fill="#cbd5e1" />
+    <rect x="177" y="328" width="130" height="11" rx="4" fill="#cbd5e1" />
+
+    <text x="28" y="416" fill="#94a3b8" font-family="Microsoft JhengHei, Heiti TC, sans-serif" font-size="18">原始網站的圖文預覽</text>
+    <circle cx="398" cy="410" r="7" fill="#22c55e" />
+  </g>
+
+  <rect x="64" y="535" width="532" height="2" fill="#334155" />
+  <text x="64" y="579" fill="#94a3b8" font-family="Arial, sans-serif" font-size="20">Cloudflare Pages · Hono · React · D1</text>
+</svg>
