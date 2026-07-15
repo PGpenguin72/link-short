@@ -1,9 +1,23 @@
 name = "link-short"
-compatibility_date = "2024-11-01"
+compatibility_date = "2026-07-15"
+compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist"
+
+[vars]
+APP_BASE_URL = "https://link.pg72.tw"
+PG72_ID_ISSUER = "https://sso.pg72.tw"
+PG72_ID_CLIENT_ID = "pg72-link"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "link-short-db"
 # Replace with your actual database ID after running: npm run db:create
 database_id = "96056517-46ea-4fdf-a38b-6544b265d682"
+
+# Preview must use a separate D1 binding configured in the Pages Preview
+# environment. No preview database exists yet, so this file intentionally does
+# not point Preview at the production database.
+[env.preview.vars]
+APP_BASE_URL = "https://link-preview.pg72.tw"
+PG72_ID_ISSUER = "https://sso-preview.pg72.tw"
+PG72_ID_CLIENT_ID = "pg72-link-preview"

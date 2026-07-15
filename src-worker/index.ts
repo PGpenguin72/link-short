@@ -2,16 +2,22 @@
 import { Hono } from 'hono'
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
+import {
+  createAuthorizationRequest,
+  decodeOidcTransaction,
+  encodeOidcTransaction,
+  processAuthorizationCallback,
+  type OidcBindings,
+} from './oidc'
+import { hasExpectedOrigin, isAllowedTargetUrl, requiresOriginCheck } from './security'
 
-type Env = {
+type Env = OidcBindings & {
   DB: D1Database
   ASSETS: Fetcher
-  GOOGLE_CLIENT_ID: string
-  GOOGLE_CLIENT_SECRET: string
-  ALLOWED_EMAIL: string // admin email
+  BOOTSTRAP_ADMIN_EMAIL?: string
 }
 
-type SessionUser = { email: string; is_admin: boolean; banned: boolean }
+type SessionUser = { subject: string; email: string; is_admin: boolean; banned: boolean }
 
 type Variables = { user: SessionUser }
 
@@ -27,16 +33,23 @@ type LinkRow = {
 }
 
 const RESERVED = new Set(['admin', 'login', 'api', 'dashboard', '404'])
+const SESSION_COOKIE = '__Host-link_session'
+const OIDC_TRANSACTION_COOKIE = '__Host-link_oidc'
+const SESSION_SECONDS = 7 * 86400
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 type AppEnv = { Bindings: Env; Variables: Variables }
 type Ctx = Context<AppEnv>
 
 const app = new Hono<AppEnv>()
 
-// Surface real errors instead of opaque 500s
 app.onError((err, c) => {
-  console.error('[Worker Error]', err)
-  return c.json({ error: err.message }, 500)
+  console.error(JSON.stringify({
+    event: 'worker_request_failed',
+    path: c.req.path,
+    error: err.name || 'Error',
+  }))
+  return c.json({ error: 'Internal Server Error' }, 500)
 })
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -48,17 +61,137 @@ function randSlug(len = 6) {
 }
 
 async function loadUser(c: Ctx): Promise<SessionUser | null> {
-  const sid = getCookie(c, 'session')
-  if (!sid) return null
+  const sid = getCookie(c, SESSION_COOKIE)
+  if (!sid || !SESSION_ID_PATTERN.test(sid)) return null
   const row = await c.env.DB.prepare(
-    `SELECT s.email AS email, u.banned AS banned, u.is_admin AS is_admin
-     FROM sessions s LEFT JOIN users u ON u.email = s.email
+    `SELECT u.sso_subject AS subject, u.email AS email,
+            u.banned AS banned, u.is_admin AS is_admin
+     FROM sessions s JOIN users u ON u.sso_subject = s.sso_subject
      WHERE s.id = ? AND s.expires_at > datetime('now')`
   )
     .bind(sid)
-    .first<{ email: string; banned: number | null; is_admin: number | null }>()
+    .first<{ subject: string; email: string; banned: number; is_admin: number }>()
   if (!row) return null
-  return { email: row.email, banned: !!row.banned, is_admin: !!row.is_admin }
+  return {
+    subject: row.subject,
+    email: row.email,
+    banned: row.banned === 1,
+    is_admin: row.is_admin === 1,
+  }
+}
+
+type UserRow = {
+  email: string
+  sso_subject: string
+  banned: number
+  is_admin: number
+}
+
+export function normalizeEmail(email: string): string {
+  const normalized = email.trim().toLowerCase()
+  if (normalized.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(normalized)) {
+    throw new Error('INVALID_EMAIL')
+  }
+  return normalized
+}
+
+async function applyAdminBootstrap(
+  env: Pick<Env, 'DB' | 'BOOTSTRAP_ADMIN_EMAIL'>,
+  user: UserRow,
+  verifiedEmail: string,
+): Promise<UserRow> {
+  if (user.is_admin === 1) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO auth_bootstrap (id, admin_subject, completed_at)
+       VALUES (1, ?, datetime('now'))`
+    ).bind(user.sso_subject).run()
+    return user
+  }
+
+  const bootstrapEmail = env.BOOTSTRAP_ADMIN_EMAIL?.trim()
+  if (!bootstrapEmail || normalizeEmail(bootstrapEmail) !== verifiedEmail) return user
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO auth_bootstrap (id, admin_subject, completed_at)
+       SELECT 1, ?, datetime('now')
+       WHERE NOT EXISTS (SELECT 1 FROM auth_bootstrap WHERE id = 1)
+         AND NOT EXISTS (
+           SELECT 1 FROM users WHERE is_admin = 1 AND sso_subject IS NOT NULL
+         )
+       ON CONFLICT(id) DO NOTHING`
+    ).bind(user.sso_subject),
+    env.DB.prepare(
+      `UPDATE users SET is_admin = 1
+       WHERE sso_subject = ?
+         AND EXISTS (
+           SELECT 1 FROM auth_bootstrap
+           WHERE id = 1 AND admin_subject = ?
+         )`
+    ).bind(user.sso_subject, user.sso_subject),
+  ])
+  return (await env.DB.prepare(
+    `SELECT email, sso_subject, banned, is_admin
+     FROM users WHERE sso_subject = ?`
+  ).bind(user.sso_subject).first<UserRow>()) ?? user
+}
+
+export async function resolveOidcUser(
+  env: Pick<Env, 'DB' | 'BOOTSTRAP_ADMIN_EMAIL'>,
+  subject: string,
+  email: string,
+): Promise<UserRow> {
+  const verifiedEmail = normalizeEmail(email)
+  const existingSubject = await env.DB.prepare(
+    `SELECT email, sso_subject, banned, is_admin
+     FROM users WHERE sso_subject = ?`
+  ).bind(subject).first<UserRow>()
+  if (existingSubject) return existingSubject
+
+  try {
+    const bound = await env.DB.prepare(
+      `UPDATE users SET sso_subject = ?
+       WHERE email = (
+         SELECT email FROM users
+         WHERE lower(email) = ? AND sso_subject IS NULL
+         ORDER BY created_at ASC LIMIT 1
+       ) AND sso_subject IS NULL
+       RETURNING email, sso_subject, banned, is_admin`
+    ).bind(subject, verifiedEmail).first<UserRow>()
+    if (bound) return applyAdminBootstrap(env, bound, verifiedEmail)
+  } catch {
+    const concurrent = await env.DB.prepare(
+      `SELECT email, sso_subject, banned, is_admin
+       FROM users WHERE sso_subject = ?`
+    ).bind(subject).first<UserRow>()
+    if (concurrent) return concurrent
+    throw new Error('OIDC_IDENTITY_CONFLICT')
+  }
+
+  const emailOwner = await env.DB.prepare(
+    `SELECT email, sso_subject, banned, is_admin
+     FROM users WHERE lower(email) = ? LIMIT 1`
+  ).bind(verifiedEmail).first<UserRow>()
+  if (emailOwner?.sso_subject && emailOwner.sso_subject !== subject) {
+    throw new Error('OIDC_IDENTITY_CONFLICT')
+  }
+
+  try {
+    const inserted = await env.DB.prepare(
+      `INSERT INTO users (email, sso_subject, banned, is_admin)
+       VALUES (?, ?, 0, 0)
+       RETURNING email, sso_subject, banned, is_admin`
+    ).bind(verifiedEmail, subject).first<UserRow>()
+    if (!inserted) throw new Error('OIDC_USER_CREATE_FAILED')
+    return applyAdminBootstrap(env, inserted, verifiedEmail)
+  } catch {
+    const concurrent = await env.DB.prepare(
+      `SELECT email, sso_subject, banned, is_admin
+       FROM users WHERE sso_subject = ?`
+    ).bind(subject).first<UserRow>()
+    if (concurrent) return concurrent
+    throw new Error('OIDC_IDENTITY_CONFLICT')
+  }
 }
 
 // ── Auth gate for all /api/links + /api/admin routes ─────────────────────────────
@@ -70,13 +203,28 @@ const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next()
 }
 
+const mutationOriginMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (
+    requiresOriginCheck(c.req.method)
+    && !hasExpectedOrigin(c.req.header('origin'), c.env.APP_BASE_URL)
+  ) {
+    return c.json({ error: 'Invalid request origin' }, 403)
+  }
+  await next()
+}
+
 function requireAdmin(c: Ctx): boolean {
   return c.get('user')?.is_admin === true
 }
 
-app.use('/api/links/*', authMiddleware)
-app.use('/api/links', authMiddleware)
-app.use('/api/admin/*', authMiddleware)
+app.use('/api/links/*', mutationOriginMiddleware, authMiddleware)
+app.use('/api/links', mutationOriginMiddleware, authMiddleware)
+app.use('/api/admin/*', mutationOriginMiddleware, authMiddleware)
+app.use('/api/auth/*', async (c, next) => {
+  await next()
+  c.header('Cache-Control', 'no-store')
+  c.header('Pragma', 'no-cache')
+})
 
 // ── Auth: me ─────────────────────────────────────────────────────────────────
 app.get('/api/auth/me', async (c) => {
@@ -84,84 +232,84 @@ app.get('/api/auth/me', async (c) => {
   return c.json({ user })
 })
 
-// ── Auth: login ──────────────────────────────────────────────────────────────
-app.get('/api/auth/login', (c) => {
-  const state = crypto.randomUUID()
-  const u = new URL(c.req.url)
-  const redirect = `${u.protocol}//${u.host}/api/auth/callback`
-  setCookie(c, 'oauth_state', state, { httpOnly: true, secure: true, sameSite: 'Lax', maxAge: 600, path: '/' })
-  return c.redirect(
-    `https://accounts.google.com/o/oauth2/v2/auth?` +
-      new URLSearchParams({
-        client_id: c.env.GOOGLE_CLIENT_ID,
-        redirect_uri: redirect,
-        response_type: 'code',
-        scope: 'openid email',
-        state,
-        prompt: 'select_account',
-      })
-  )
+// ── Auth: PG72 ID login ─────────────────────────────────────────────────────
+app.get('/api/auth/login', async (c) => {
+  try {
+    const { authorizationUrl, transaction } = await createAuthorizationRequest(c.env)
+    const transactionCookie = await encodeOidcTransaction(
+      transaction,
+      c.env.PG72_ID_CLIENT_SECRET,
+    )
+    setCookie(c, OIDC_TRANSACTION_COOKIE, transactionCookie, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: 600,
+      path: '/',
+    })
+    return c.redirect(authorizationUrl.href)
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'oidc_login_start_failed',
+      error: error instanceof Error ? error.name : 'UnknownError',
+    }))
+    return c.redirect('/?error=auth_unavailable')
+  }
 })
 
 // ── Auth: callback ───────────────────────────────────────────────────────────
 app.get('/api/auth/callback', async (c) => {
-  const { code, state, error } = c.req.query()
-  if (error) return c.redirect('/?error=auth_failed')
-  const stored = getCookie(c, 'oauth_state')
-  deleteCookie(c, 'oauth_state', { path: '/' })
-  if (!code || !state || state !== stored) return c.redirect('/?error=invalid_state')
-
-  const u = new URL(c.req.url)
-  const redirect = `${u.protocol}//${u.host}/api/auth/callback`
-
-  const tr = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: c.env.GOOGLE_CLIENT_ID,
-      client_secret: c.env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: redirect,
-      grant_type: 'authorization_code',
-    }),
-  })
-  const tokens = (await tr.json()) as { access_token?: string }
-  if (!tokens.access_token) return c.redirect('/?error=auth_failed')
-
-  const ur = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  })
-  const info = (await ur.json()) as { email: string }
-  if (!info.email) return c.redirect('/?error=auth_failed')
-
-  const isAdmin = info.email === c.env.ALLOWED_EMAIL ? 1 : 0
-
-  // Upsert user (preserve banned flag; keep admin status in sync)
-  await c.env.DB.prepare(
-    `INSERT INTO users (email, is_admin) VALUES (?, ?)
-     ON CONFLICT(email) DO UPDATE SET is_admin = excluded.is_admin`
+  const encodedTransaction = getCookie(c, OIDC_TRANSACTION_COOKIE)
+  // __Host- cookies must carry Secure even on deletion or hono throws.
+  deleteCookie(c, OIDC_TRANSACTION_COOKIE, { path: '/', secure: true })
+  const transaction = await decodeOidcTransaction(
+    encodedTransaction,
+    c.env.PG72_ID_CLIENT_SECRET,
   )
-    .bind(info.email, isAdmin)
-    .run()
+  if (!transaction) return c.redirect('/?error=invalid_state')
 
-  const banned = await c.env.DB.prepare('SELECT banned FROM users WHERE email = ?')
-    .bind(info.email)
-    .first<{ banned: number }>()
-  if (banned?.banned) return c.redirect('/?error=banned')
+  try {
+    const identity = await processAuthorizationCallback(c.env, c.req.url, transaction)
+    const user = await resolveOidcUser(c.env, identity.subject, identity.email)
+    if (user.banned === 1) return c.redirect('/?error=banned')
 
-  const sid = crypto.randomUUID()
-  const exp = new Date(Date.now() + 7 * 86400_000).toISOString().replace('T', ' ').slice(0, 19)
-  await c.env.DB.prepare(`INSERT INTO sessions (id, email, expires_at) VALUES (?, ?, ?)`)
-    .bind(sid, info.email, exp)
-    .run()
-  setCookie(c, 'session', sid, { httpOnly: true, secure: true, sameSite: 'Lax', maxAge: 7 * 86400, path: '/' })
-  return c.redirect(isAdmin ? '/admin' : '/dashboard')
+    const sid = crypto.randomUUID()
+    const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1_000)
+      .toISOString()
+      .replace('T', ' ')
+      .slice(0, 19)
+    await c.env.DB.prepare(
+      `INSERT INTO sessions (id, sso_subject, expires_at) VALUES (?, ?, ?)`
+    ).bind(sid, user.sso_subject, expiresAt).run()
+    setCookie(c, SESSION_COOKIE, sid, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: SESSION_SECONDS,
+      path: '/',
+    })
+    deleteCookie(c, 'session', { path: '/' })
+    return c.redirect(user.is_admin === 1 ? '/admin' : '/dashboard')
+  } catch (error) {
+    const errorCode = error instanceof Error ? error.message : ''
+    console.error(JSON.stringify({
+      event: 'oidc_callback_failed',
+      error: error instanceof Error ? error.name : 'UnknownError',
+    }))
+    return c.redirect(errorCode === 'OIDC_IDENTITY_CONFLICT'
+      ? '/?error=identity_conflict'
+      : '/?error=auth_failed')
+  }
 })
 
 // ── Auth: logout ─────────────────────────────────────────────────────────────
 app.post('/api/auth/logout', async (c) => {
-  const sid = getCookie(c, 'session')
+  if (!hasExpectedOrigin(c.req.header('origin'), c.env.APP_BASE_URL)) {
+    return c.json({ error: 'Invalid request origin' }, 403)
+  }
+  const sid = getCookie(c, SESSION_COOKIE)
   if (sid) await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run()
+  deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true })
   deleteCookie(c, 'session', { path: '/' })
   return c.json({ ok: true })
 })
@@ -182,11 +330,7 @@ app.post('/api/links', async (c) => {
   const user = c.get('user')
   const { slug: rawSlug, target_url } = await c.req.json<{ slug?: string; target_url: string }>()
   if (!target_url?.trim()) return c.json({ error: '目標網址為必填' }, 400)
-  try {
-    new URL(target_url)
-  } catch {
-    return c.json({ error: '無效的目標網址' }, 400)
-  }
+  if (!isAllowedTargetUrl(target_url)) return c.json({ error: '無效的目標網址' }, 400)
 
   let slug = rawSlug?.trim()
   if (!slug) {
@@ -227,12 +371,8 @@ app.put('/api/links/:id', async (c) => {
   if (!slug?.trim() && !target_url?.trim()) return c.json({ error: '沒有要更新的內容' }, 400)
   if (slug?.trim() && !/^[a-zA-Z0-9_-]+$/.test(slug.trim())) return c.json({ error: '無效的短代碼' }, 400)
   if (slug?.trim() && RESERVED.has(slug.trim().toLowerCase())) return c.json({ error: '此短代碼為保留字' }, 400)
-  if (target_url?.trim()) {
-    try {
-      new URL(target_url)
-    } catch {
-      return c.json({ error: '無效的目標網址' }, 400)
-    }
+  if (target_url?.trim() && !isAllowedTargetUrl(target_url)) {
+    return c.json({ error: '無效的目標網址' }, 400)
   }
 
   try {
@@ -295,16 +435,25 @@ app.get('/api/admin/users', async (c) => {
 // Ban / unban a user
 app.post('/api/admin/users/:email/ban', async (c) => {
   if (!requireAdmin(c)) return c.json({ error: '沒有權限' }, 403)
-  const email = decodeURIComponent(c.req.param('email'))
+  const email = normalizeEmail(decodeURIComponent(c.req.param('email')))
   const { banned } = await c.req.json<{ banned: boolean }>()
 
-  if (email === c.env.ALLOWED_EMAIL) return c.json({ error: '無法停權管理員帳號' }, 400)
+  const target = await c.env.DB.prepare(
+    `SELECT sso_subject, is_admin FROM users WHERE lower(email) = ?`
+  ).bind(email).first<{ sso_subject: string | null; is_admin: number }>()
+  if (!target) return c.json({ error: '找不到此帳號' }, 404)
+  if (target.is_admin === 1) return c.json({ error: '無法停權管理員帳號' }, 400)
 
-  await c.env.DB.prepare('UPDATE users SET banned = ? WHERE email = ?')
-    .bind(banned ? 1 : 0, email)
-    .run()
-  // When banning, also kill their active sessions
-  if (banned) await c.env.DB.prepare('DELETE FROM sessions WHERE email = ?').bind(email).run()
+  const statements = [
+    c.env.DB.prepare('UPDATE users SET banned = ? WHERE lower(email) = ?')
+      .bind(banned ? 1 : 0, email),
+  ]
+  if (banned && target.sso_subject) {
+    statements.push(
+      c.env.DB.prepare('DELETE FROM sessions WHERE sso_subject = ?').bind(target.sso_subject),
+    )
+  }
+  await c.env.DB.batch(statements)
   return c.json({ ok: true })
 })
 
@@ -331,12 +480,8 @@ app.put('/api/admin/links/:id', async (c) => {
   const { slug, target_url } = await c.req.json<{ slug?: string; target_url?: string }>()
 
   if (slug?.trim() && !/^[a-zA-Z0-9_-]+$/.test(slug.trim())) return c.json({ error: '無效的短代碼' }, 400)
-  if (target_url?.trim()) {
-    try {
-      new URL(target_url)
-    } catch {
-      return c.json({ error: '無效的目標網址' }, 400)
-    }
+  if (target_url?.trim() && !isAllowedTargetUrl(target_url)) {
+    return c.json({ error: '無效的目標網址' }, 400)
   }
   try {
     const link = await c.env.DB.prepare(

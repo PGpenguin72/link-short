@@ -6,30 +6,37 @@
     "dev": "vite",
     "build:worker": "esbuild src-worker/index.ts --bundle --outfile=dist/_worker.js --format=esm --platform=browser --target=es2022 --external:node:*",
     "build": "vite build && npm run build:worker",
+    "test": "vitest run",
+    "check": "npx tsc --noEmit && npx tsc --noEmit -p tsconfig.worker.json && npm test && npm run build",
     "preview": "vite preview",
-    "dev:worker": "npm run build && wrangler pages dev dist --compatibility-date=2024-11-01",
+    "dev:worker": "npm run build && wrangler pages dev dist",
     "db:create": "wrangler d1 create link-short-db",
     "db:migrate:local": "wrangler d1 execute link-short-db --local --file=schema.sql",
+    "db:migrate:oidc:local": "wrangler d1 execute link-short-db --local --file=migration-003-pg72-oidc.sql",
     "db:migrate": "wrangler d1 execute link-short-db --remote --file=schema.sql",
+    "db:migrate:oidc": "wrangler d1 execute link-short-db --remote --file=migration-003-pg72-oidc.sql",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=link-short"
   },
   "dependencies": {
-    "hono": "^4.5.0",
+    "hono": "^4.12.30",
+    "oauth4webapi": "^3.8.6",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.24.1"
+    "react-router-dom": "^6.30.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240725.0",
-    "@tailwindcss/vite": "^4.0.0",
+    "@cloudflare/workers-types": "^5.20260715.1",
+    "@tailwindcss/vite": "^4.3.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "esbuild": "^0.23.0",
-    "tailwindcss": "^4.0.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "miniflare": "^4.20260710.0",
+    "tailwindcss": "^4.3.2",
     "typescript": "^5.5.3",
-    "vite": "^5.3.4",
-    "wrangler": "^3.65.0"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.110.0"
   }
 }

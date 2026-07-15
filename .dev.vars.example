@@ -1,3 +1,7 @@
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-ALLOWED_EMAIL=admin@example.com
+APP_BASE_URL=http://localhost:8788
+PG72_ID_ISSUER=https://sso-preview.pg72.tw
+PG72_ID_CLIENT_ID=pg72-link-local
+PG72_ID_CLIENT_SECRET=replace-with-a-local-client-secret
+# Used once on a fresh database. After the subject is recorded in D1, admin
+# authorization comes only from users.is_admin and never from this email.
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
