@@ -2,9 +2,9 @@
 
 ## Project Summary
 
-This repository is the source for `link.pg72.tw`, a multi-user short URL service deployed to Cloudflare Pages. It uses a React SPA for the UI, a Hono Worker in Pages Advanced Mode for all server behavior, Cloudflare D1 for persistence, and PG72 ID OpenID Connect for authentication.
+This repository is the source for `link.pg72.tw`, a multi-user short URL service deployed to Cloudflare Pages. It uses a React SPA for the UI, a Hono Worker in Pages Advanced Mode for all server behavior, Cloudflare D1 for persistence, and PGID OpenID Connect for authentication.
 
-All active PG72 ID users may sign in. Authentication is bound to the issuer's stable `sub`; verified email is used only once to bind a pre-migration user. Administrator authorization comes from D1 `users.is_admin`, never from a request-time email comparison.
+All active PGID users may sign in. Authentication is bound to the issuer's stable `sub`; verified email is used only once to bind a pre-migration user. Administrator authorization comes from D1 `users.is_admin`, never from a request-time email comparison.
 
 ## Start Here
 
@@ -15,7 +15,7 @@ Read these files before changing behavior:
 - `src/App.tsx`: client routes and authentication-aware navigation.
 - `schema.sql`: complete schema for a fresh database.
 - `migration-002.sql`: one-time migration for databases created by an older version.
-- `migration-003-pg72-oidc.sql`: existing Google/email database migration to stable PG72 ID subjects.
+- `migration-003-pg72-oidc.sql`: existing Google/email database migration to stable PGID subjects.
 - `wrangler.toml`: Pages output directory and D1 binding.
 
 ## Commands
@@ -111,7 +111,7 @@ When adding a root-level public file such as `/robots.txt`, register it before `
 | `DB` | D1 binding | Users, links, and sessions |
 | `ASSETS` | Pages asset binding | React build output and public assets |
 | `APP_BASE_URL` | Variable | Exact application origin used for callbacks and Origin checks |
-| `PG72_ID_ISSUER` | Variable | Exact PG72 ID issuer origin |
+| `PG72_ID_ISSUER` | Variable | Exact PGID issuer origin |
 | `PG72_ID_CLIENT_ID` | Variable | Registered confidential OIDC client ID |
 | `PG72_ID_CLIENT_SECRET` | Secret | OIDC client secret and transaction-cookie HMAC key material |
 | `BOOTSTRAP_ADMIN_EMAIL` | Variable/secret | Optional one-time verified-email bootstrap for an empty database |

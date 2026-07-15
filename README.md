@@ -5,13 +5,13 @@
 ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages-F38020?logo=cloudflare&logoColor=white)
 ![Cloudflare D1](https://img.shields.io/badge/Database-D1-F38020?logo=cloudflare&logoColor=white)
 
-一個部署在 Cloudflare Pages 的多使用者短網址系統。使用者可以透過 PG72 ID OpenID Connect 登入、建立與管理短網址、產生 QR Code；管理員可管理全站連結與停權帳號。
+一個部署在 Cloudflare Pages 的多使用者短網址系統。使用者可以透過 PGID OpenID Connect 登入、建立與管理短網址、產生 QR Code；管理員可管理全站連結與停權帳號。
 
 ![link.pg72.tw 社群分享預覽](public/og-image.png)
 
 ## 功能
 
-- PG72 ID OIDC Authorization Code + PKCE S256 登入與 7 天 Session
+- PGID OIDC Authorization Code + PKCE S256 登入與 7 天 Session
 - 自訂或自動產生短代碼
 - 建立、編輯、刪除個人短網址
 - 複製、系統分享、QR Code 顯示與下載
@@ -25,7 +25,7 @@
 | 圖示 | 代表元件 | 說明 |
 | --- | --- | --- |
 | 👤 | 使用者 | 開啟網站、管理連結或使用短網址的人 |
-| 🔐 | PG72 ID | 透過 OIDC 驗證穩定 `sub` 身分 |
+| 🔐 | PGID | 透過 OIDC 驗證穩定 `sub` 身分 |
 | ⚙️ | Worker + Hono | 負責 API、Session、權限、轉址與靜態檔案分流 |
 | 🗃️ | Cloudflare D1 | 儲存使用者、Session 與連結 |
 | 🧭 | 轉址 | 有效的 `/:slug` 回傳 `302` 到目標網址 |
@@ -38,7 +38,7 @@ flowchart LR
     User[👤 使用者] --> Edge[☁️ Cloudflare Pages]
     Edge --> Worker[⚙️ Hono Worker]
     Worker -->|API 請求| D1[(🗃️ Cloudflare D1)]
-    Worker -->|OIDC + PKCE| OAuth[🔐 PG72 ID]
+    Worker -->|OIDC + PKCE| OAuth[🔐 PGID]
     Worker -->|前端路由| Assets[⚛️ React SPA]
     Worker -->|有效短代碼| Target[🧭 原始網站]
 ```
@@ -67,10 +67,10 @@ sequenceDiagram
     actor User as 👤 使用者
     participant App as ⚛️ React
     participant Worker as ⚙️ Worker
-    participant ID as 🔐 PG72 ID
+    participant ID as 🔐 PGID
     participant D1 as 🗃️ D1
 
-    User->>App: 點選 PG72 ID 登入
+    User->>App: 點選 PGID 登入
     App->>Worker: GET /api/auth/login
     Worker->>ID: OIDC 授權 + PKCE
     ID-->>Worker: callback + authorization code
@@ -118,7 +118,7 @@ sequenceDiagram
 - npm
 - Cloudflare 帳號與 Pages 專案
 - Cloudflare D1 資料庫
-- PG72 ID 機密 OIDC client
+- PGID 機密 OIDC client
 
 ## 本機開發
 
@@ -158,7 +158,7 @@ sequenceDiagram
    npm run dev:worker
    ```
 
-   預設網址為 `http://localhost:8788`。請在 PG72 ID 註冊本機 callback：
+   預設網址為 `http://localhost:8788`。請在 PGID 註冊本機 callback：
 
    ```text
    http://localhost:8788/api/auth/callback
@@ -183,7 +183,7 @@ npm run build
 
 ## 部署
 
-### 1. 註冊 PG72 ID OIDC clients
+### 1. 註冊 PGID OIDC clients
 
 Link 使用 confidential client、`client_secret_basic`、Authorization Code、PKCE S256，scopes 為 `openid email`，且不可略過 consent。註冊以下 redirect URIs：
 
@@ -224,7 +224,7 @@ Cloudflare Pages 專案使用以下設定：
 | 名稱 | 類型 | 用途 |
 | --- | --- | --- |
 | `APP_BASE_URL` | 變數 | 該環境的精確 origin，用於 callback 與 Origin 驗證 |
-| `PG72_ID_ISSUER` | 變數 | PG72 ID issuer 精確 origin |
+| `PG72_ID_ISSUER` | 變數 | PGID issuer 精確 origin |
 | `PG72_ID_CLIENT_ID` | 變數 | 該環境的 OIDC client ID |
 | `PG72_ID_CLIENT_SECRET` | Secret | 該環境的 OIDC client secret |
 | `BOOTSTRAP_ADMIN_EMAIL` | 變數或 Secret | 可選，僅限空資料庫的一次管理員 bootstrap |
@@ -242,7 +242,7 @@ npm run deploy
 | Method | Path | 權限 | 用途 |
 | --- | --- | --- | --- |
 | `GET` | `/api/auth/me` | 公開 | 取得目前 Session 使用者 |
-| `GET` | `/api/auth/login` | 公開 | 開始 PG72 ID OIDC 登入 |
+| `GET` | `/api/auth/login` | 公開 | 開始 PGID OIDC 登入 |
 | `GET` | `/api/auth/callback` | 公開 | OAuth callback |
 | `POST` | `/api/auth/logout` | 公開 | 刪除 Session 並登出 |
 | `GET` | `/api/links` | 已登入 | 列出自己的連結 |
@@ -270,7 +270,7 @@ npm run deploy
 - 不要提交 `.dev.vars`、OAuth Client Secret 或 Session ID。
 - OIDC 使用 oauth4webapi 驗證 state、nonce、PKCE、issuer、audience、ID Token 簽章與 UserInfo `sub`。
 - OIDC transaction 與 Session Cookie 使用 `HttpOnly`、`Secure`、`SameSite=Lax`；transaction cookie 另以 HMAC 防篡改。
-- 舊 Google 使用者只能在第一次 PG72 ID 登入用 verified email 綁定，之後僅使用 `sub`。
+- 舊 Google 使用者只能在第一次 PGID 登入用 verified email 綁定，之後僅使用 `sub`。
 - 所有 cookie-authenticated POST/PUT/PATCH/DELETE 都必須帶有與 `APP_BASE_URL` 完全相同的 `Origin`。
 - 短網址目標只允許 `http:` 與 `https:`，拒絕 `javascript:`、`data:` 與其他 scheme。
 - API 權限在 Worker 驗證，不依賴前端路由保護。

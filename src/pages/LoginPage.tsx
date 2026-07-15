@@ -2,9 +2,9 @@ import { useSearchParams } from 'react-router-dom'
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: '登入失敗，請再試一次',
-  auth_unavailable: 'PG72 ID 暫時無法使用，請稍後再試',
+  auth_unavailable: 'PGID 暫時無法使用，請稍後再試',
   banned: '此帳號已被停權',
-  identity_conflict: '此電子信箱已綁定其他 PG72 ID 帳號',
+  identity_conflict: '此電子信箱已綁定其他 PGID 帳號',
   invalid_state: '登入流程異常，請再試一次',
 }
 
@@ -38,7 +38,7 @@ export default function LoginPage() {
           <span className="flex h-5 w-5 items-center justify-center rounded bg-slate-900 text-[9px] font-bold text-white" aria-hidden="true">
             ID
           </span>
-          使用 PG72 ID 登入
+          使用 PGID 登入
         </a>
 
         <p className="mt-6 text-center text-xs text-slate-600">
