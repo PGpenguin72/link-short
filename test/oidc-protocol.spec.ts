@@ -90,10 +90,15 @@ function installProviderMock(options: {
     if (url.pathname === '/oauth2/token') {
       options.onTokenRequest?.()
       const headers = new Headers(init?.headers)
-      expect(headers.get('authorization')).toMatch(/^Basic /)
+      // ClientSecretPost: credentials travel in the body, not a Basic header,
+      // to avoid oauth4webapi percent-encoding "-"/"_" in a way the PGID token
+      // endpoint does not decode.
+      expect(headers.get('authorization')).toBeNull()
       const body = init?.body instanceof URLSearchParams
         ? init.body
         : new URLSearchParams(String(init?.body ?? ''))
+      expect(body.get('client_id')).toBe(CLIENT_ID)
+      expect(body.get('client_secret')).toBeTruthy()
       expect(body.get('grant_type')).toBe('authorization_code')
       expect(body.get('redirect_uri')).toBe(`${APP_BASE_URL}/api/auth/callback`)
       expect(body.get('code_verifier')).toBe(options.transaction.codeVerifier)

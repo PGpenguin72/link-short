@@ -79,7 +79,12 @@ function readConfig(env: OidcBindings): OidcConfig {
     appBaseUrl,
     redirectUri: `${appBaseUrl.origin}/api/auth/callback`,
     client: { client_id: clientId },
-    clientAuth: oauth.ClientSecretBasic(clientSecret),
+    // ClientSecretPost (client credentials in the token request body), not
+    // ClientSecretBasic: oauth4webapi percent-encodes the Basic userinfo per
+    // RFC 6749 §2.3.1 (e.g. "-"→"%2D", "_"→"%5F"), but the PGID token endpoint
+    // decodes the Basic header with a plain split(":") and never percent-decodes,
+    // so a client_id/secret containing "-" or "_" fails as invalid_client.
+    clientAuth: oauth.ClientSecretPost(clientSecret),
   }
 }
 
