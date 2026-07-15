@@ -2,9 +2,9 @@
 
 ## Project Summary
 
-This repository is the source for `link.pg72.tw`, a multi-user short URL service deployed to Cloudflare Pages. It uses a React SPA for the UI, a Hono Worker in Pages Advanced Mode for all server behavior, Cloudflare D1 for persistence, and Google OAuth for authentication.
+This repository is the source for `link.pg72.tw`, a multi-user short URL service deployed to Cloudflare Pages. It uses a React SPA for the UI, a Hono Worker in Pages Advanced Mode for all server behavior, Cloudflare D1 for persistence, and PG72 ID OpenID Connect for authentication.
 
-All Google users may sign in. `ALLOWED_EMAIL` identifies the single administrator; it is not a login allowlist.
+All active PG72 ID users may sign in. Authentication is bound to the issuer's stable `sub`; verified email is used only once to bind a pre-migration user. Administrator authorization comes from D1 `users.is_admin`, never from a request-time email comparison.
 
 ## Start Here
 
@@ -15,6 +15,7 @@ Read these files before changing behavior:
 - `src/App.tsx`: client routes and authentication-aware navigation.
 - `schema.sql`: complete schema for a fresh database.
 - `migration-002.sql`: one-time migration for databases created by an older version.
+- `migration-003-pg72-oidc.sql`: existing Google/email database migration to stable PG72 ID subjects.
 - `wrangler.toml`: Pages output directory and D1 binding.
 
 ## Commands
@@ -73,13 +74,17 @@ When adding a root-level public file such as `/robots.txt`, register it before `
 
 ## Authentication and Authorization
 
-- OAuth state is stored in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie for 10 minutes.
+- OIDC state, nonce, and PKCE verifier are HMAC-protected in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie for 10 minutes.
+- `oauth4webapi` must validate discovery issuer, callback state, ID Token issuer/audience/nonce/signature, and UserInfo `sub` plus `email_verified`.
 - Sessions are random UUIDs stored in D1 and expire after 7 days.
+- Sessions join users by `sso_subject`. Email remains link profile/ownership data and must not authenticate a returning account.
 - Never trust only React route guards. Enforce access in the Worker.
 - `authMiddleware` must protect user and admin APIs.
 - Every admin handler must call `requireAdmin` before accessing data.
+- Every cookie-authenticated unsafe method must pass `mutationOriginMiddleware`; do not add a POST/PUT/PATCH/DELETE route that bypasses the exact `APP_BASE_URL` Origin check.
 - Banning a user must invalidate active sessions.
-- Store `GOOGLE_CLIENT_SECRET` as a Cloudflare secret and never commit `.dev.vars`.
+- `BOOTSTRAP_ADMIN_EMAIL` may promote only the first fresh-database administrator; `auth_bootstrap.admin_subject` permanently closes that email bootstrap path.
+- Store `PG72_ID_CLIENT_SECRET` as a Cloudflare secret and never commit `.dev.vars`.
 
 ## D1 Conventions
 
@@ -88,6 +93,7 @@ When adding a root-level public file such as `/robots.txt`, register it before `
 - `schema.sql` must remain sufficient for a fresh install.
 - Add a new numbered migration for existing production databases when changing schema. Do not rewrite an already-applied migration.
 - Keep `slug` unique and preserve the existing allowed format: letters, numbers, `_`, and `-`.
+- Link targets must use only the `http:` or `https:` scheme.
 - A link redirects only when `links.active = 1` and its owner is not banned.
 
 ## Frontend Conventions
@@ -104,9 +110,11 @@ When adding a root-level public file such as `/robots.txt`, register it before `
 | --- | --- | --- |
 | `DB` | D1 binding | Users, links, and sessions |
 | `ASSETS` | Pages asset binding | React build output and public assets |
-| `GOOGLE_CLIENT_ID` | Variable | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Secret | Google OAuth client secret |
-| `ALLOWED_EMAIL` | Variable | Administrator email |
+| `APP_BASE_URL` | Variable | Exact application origin used for callbacks and Origin checks |
+| `PG72_ID_ISSUER` | Variable | Exact PG72 ID issuer origin |
+| `PG72_ID_CLIENT_ID` | Variable | Registered confidential OIDC client ID |
+| `PG72_ID_CLIENT_SECRET` | Secret | OIDC client secret and transaction-cookie HMAC key material |
+| `BOOTSTRAP_ADMIN_EMAIL` | Variable/secret | Optional one-time verified-email bootstrap for an empty database |
 
 ## Change Checklist
 

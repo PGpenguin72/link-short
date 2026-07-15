@@ -5,13 +5,13 @@
 ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages-F38020?logo=cloudflare&logoColor=white)
 ![Cloudflare D1](https://img.shields.io/badge/Database-D1-F38020?logo=cloudflare&logoColor=white)
 
-一個部署在 Cloudflare Pages 的多使用者短網址系統。使用者可以透過 Google OAuth 登入、建立與管理短網址、產生 QR Code；管理員可管理全站連結與停權帳號。
+一個部署在 Cloudflare Pages 的多使用者短網址系統。使用者可以透過 PG72 ID OpenID Connect 登入、建立與管理短網址、產生 QR Code；管理員可管理全站連結與停權帳號。
 
 ![link.pg72.tw 社群分享預覽](public/og-image.png)
 
 ## 功能
 
-- Google OAuth 2.0 登入與 7 天 Session
+- PG72 ID OIDC Authorization Code + PKCE S256 登入與 7 天 Session
 - 自訂或自動產生短代碼
 - 建立、編輯、刪除個人短網址
 - 複製、系統分享、QR Code 顯示與下載
@@ -25,7 +25,7 @@
 | 圖示 | 代表元件 | 說明 |
 | --- | --- | --- |
 | 👤 | 使用者 | 開啟網站、管理連結或使用短網址的人 |
-| 🔐 | Google OAuth | 驗證 Google 帳號身分 |
+| 🔐 | PG72 ID | 透過 OIDC 驗證穩定 `sub` 身分 |
 | ⚙️ | Worker + Hono | 負責 API、Session、權限、轉址與靜態檔案分流 |
 | 🗃️ | Cloudflare D1 | 儲存使用者、Session 與連結 |
 | 🧭 | 轉址 | 有效的 `/:slug` 回傳 `302` 到目標網址 |
@@ -38,7 +38,7 @@ flowchart LR
     User[👤 使用者] --> Edge[☁️ Cloudflare Pages]
     Edge --> Worker[⚙️ Hono Worker]
     Worker -->|API 請求| D1[(🗃️ Cloudflare D1)]
-    Worker -->|Google 登入| OAuth[🔐 Google OAuth]
+    Worker -->|OIDC + PKCE| OAuth[🔐 PG72 ID]
     Worker -->|前端路由| Assets[⚛️ React SPA]
     Worker -->|有效短代碼| Target[🧭 原始網站]
 ```
@@ -67,13 +67,14 @@ sequenceDiagram
     actor User as 👤 使用者
     participant App as ⚛️ React
     participant Worker as ⚙️ Worker
-    participant Google as 🔐 Google OAuth
+    participant ID as 🔐 PG72 ID
     participant D1 as 🗃️ D1
 
-    User->>App: 點選 Google 登入
+    User->>App: 點選 PG72 ID 登入
     App->>Worker: GET /api/auth/login
-    Worker->>Google: OAuth 授權
-    Google-->>Worker: callback + code
+    Worker->>ID: OIDC 授權 + PKCE
+    ID-->>Worker: callback + authorization code
+    Worker->>ID: 驗證 ID Token 與 UserInfo
     Worker->>D1: 建立或更新 user 與 session
     Worker-->>App: 設定 HttpOnly Cookie 後轉址
     User->>App: 輸入目標網址與短代碼
@@ -117,7 +118,7 @@ sequenceDiagram
 - npm
 - Cloudflare 帳號與 Pages 專案
 - Cloudflare D1 資料庫
-- Google Cloud OAuth 2.0 Web application
+- PG72 ID 機密 OIDC client
 
 ## 本機開發
 
@@ -136,12 +137,14 @@ sequenceDiagram
    編輯 `.dev.vars`：
 
    ```dotenv
-   GOOGLE_CLIENT_ID=your-google-client-id
-   GOOGLE_CLIENT_SECRET=your-google-client-secret
-   ALLOWED_EMAIL=admin@example.com
+   APP_BASE_URL=http://localhost:8788
+   PG72_ID_ISSUER=https://sso-preview.pg72.tw
+   PG72_ID_CLIENT_ID=pg72-link-local
+   PG72_ID_CLIENT_SECRET=your-local-client-secret
+   BOOTSTRAP_ADMIN_EMAIL=admin@example.com
    ```
 
-   `ALLOWED_EMAIL` 是管理員信箱，不是登入白名單；其他 Google 帳號仍可登入並管理自己的連結。
+   `BOOTSTRAP_ADMIN_EMAIL` 只會在全新資料庫第一次成功綁定時使用。完成後管理權限只來自 D1 `users.is_admin` 與已記錄的 `sso_subject`，不會在每次登入時以 email 判權。
 
 3. 建立本機 D1 資料表：
 
@@ -155,7 +158,7 @@ sequenceDiagram
    npm run dev:worker
    ```
 
-   預設網址為 `http://localhost:8788`。請將以下本機 callback 加入 Google OAuth 的 Authorized redirect URIs：
+   預設網址為 `http://localhost:8788`。請在 PG72 ID 註冊本機 callback：
 
    ```text
    http://localhost:8788/api/auth/callback
@@ -180,19 +183,17 @@ npm run build
 
 ## 部署
 
-### 1. 建立 Google OAuth 應用程式
+### 1. 註冊 PG72 ID OIDC clients
 
-1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立專案。
-2. 前往 APIs & Services → Credentials。
-3. 建立 OAuth 2.0 Client ID，類型選 Web application。
-4. 將正式網址加入 Authorized redirect URIs：
+Link 使用 confidential client、`client_secret_basic`、Authorization Code、PKCE S256，scopes 為 `openid email`，且不可略過 consent。註冊以下 redirect URIs：
 
-   ```text
-   https://link.pg72.tw/api/auth/callback
-   https://<project>.pages.dev/api/auth/callback
-   ```
+```text
+https://link.pg72.tw/api/auth/callback
+https://link-preview.pg72.tw/api/auth/callback
+http://localhost:8788/api/auth/callback
+```
 
-5. 記下 Client ID 與 Client Secret。
+建議 client IDs 分別為 `pg72-link`、`pg72-link-preview` 與 `pg72-link-local`，三個環境不共用 client secret。
 
 ### 2. 建立 D1
 
@@ -206,7 +207,7 @@ npm run db:create
 npm run db:migrate
 ```
 
-只有舊版資料庫才執行 `migration-002.sql`，不要對已使用完整 `schema.sql` 的資料庫再執行。
+只有舊版資料庫才執行 `migration-002.sql`。從現有 Google/email 身分升級時，再執行 `migration-003-pg72-oidc.sql`；這個 migration 會刻意刪除舊 Session，但不會刪除使用者或短網址。
 
 ### 3. 設定 Pages
 
@@ -222,9 +223,13 @@ Cloudflare Pages 專案使用以下設定：
 
 | 名稱 | 類型 | 用途 |
 | --- | --- | --- |
-| `GOOGLE_CLIENT_ID` | 變數 | Google OAuth Client ID |
-| `GOOGLE_CLIENT_SECRET` | Secret | Google OAuth Client Secret |
-| `ALLOWED_EMAIL` | 變數 | 唯一管理員的 Google 信箱 |
+| `APP_BASE_URL` | 變數 | 該環境的精確 origin，用於 callback 與 Origin 驗證 |
+| `PG72_ID_ISSUER` | 變數 | PG72 ID issuer 精確 origin |
+| `PG72_ID_CLIENT_ID` | 變數 | 該環境的 OIDC client ID |
+| `PG72_ID_CLIENT_SECRET` | Secret | 該環境的 OIDC client secret |
+| `BOOTSTRAP_ADMIN_EMAIL` | 變數或 Secret | 可選，僅限空資料庫的一次管理員 bootstrap |
+
+Preview 環境固定使用 `https://link-preview.pg72.tw`、`https://sso-preview.pg72.tw` 與 `pg72-link-preview`。Preview 必須另外建立 D1 並將 `DB` 綁定到該資料庫；不要讓 Preview 共用正式 `link-short-db`。`wrangler.toml` 刻意不將 Preview DB 指向正式 UUID。
 
 完成後可透過 Cloudflare Git 整合部署，或在已登入 Wrangler 的環境執行：
 
@@ -237,7 +242,7 @@ npm run deploy
 | Method | Path | 權限 | 用途 |
 | --- | --- | --- | --- |
 | `GET` | `/api/auth/me` | 公開 | 取得目前 Session 使用者 |
-| `GET` | `/api/auth/login` | 公開 | 開始 Google OAuth |
+| `GET` | `/api/auth/login` | 公開 | 開始 PG72 ID OIDC 登入 |
 | `GET` | `/api/auth/callback` | 公開 | OAuth callback |
 | `POST` | `/api/auth/logout` | 公開 | 刪除 Session 並登出 |
 | `GET` | `/api/links` | 已登入 | 列出自己的連結 |
@@ -255,14 +260,19 @@ npm run deploy
 
 | 資料表 | 重點欄位 | 用途 |
 | --- | --- | --- |
-| `users` | `email`, `banned`, `is_admin` | 使用者與管理權限 |
+| `users` | `email`, `sso_subject`, `banned`, `is_admin` | 使用者與管理權限 |
 | `links` | `slug`, `target_url`, `owner_email`, `active` | 短網址與狀態 |
-| `sessions` | `id`, `email`, `expires_at` | 伺服器端 Session |
+| `sessions` | `id`, `sso_subject`, `expires_at` | 伺服器端 Session |
+| `auth_bootstrap` | `admin_subject`, `completed_at` | 關閉 email bootstrap 後的穩定管理員身分 |
 
 ## 安全注意事項
 
 - 不要提交 `.dev.vars`、OAuth Client Secret 或 Session ID。
-- Session Cookie 使用 `HttpOnly`、`Secure`、`SameSite=Lax`。
+- OIDC 使用 oauth4webapi 驗證 state、nonce、PKCE、issuer、audience、ID Token 簽章與 UserInfo `sub`。
+- OIDC transaction 與 Session Cookie 使用 `HttpOnly`、`Secure`、`SameSite=Lax`；transaction cookie 另以 HMAC 防篡改。
+- 舊 Google 使用者只能在第一次 PG72 ID 登入用 verified email 綁定，之後僅使用 `sub`。
+- 所有 cookie-authenticated POST/PUT/PATCH/DELETE 都必須帶有與 `APP_BASE_URL` 完全相同的 `Origin`。
+- 短網址目標只允許 `http:` 與 `https:`，拒絕 `javascript:`、`data:` 與其他 scheme。
 - API 權限在 Worker 驗證，不依賴前端路由保護。
 - D1 查詢使用 prepared statement 與 `.bind()`。
 - 停權帳號時會一併刪除其現有 Session。
