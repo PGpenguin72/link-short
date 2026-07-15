@@ -292,9 +292,16 @@ app.get('/api/auth/callback', async (c) => {
     return c.redirect(user.is_admin === 1 ? '/admin' : '/dashboard')
   } catch (error) {
     const errorCode = error instanceof Error ? error.message : ''
+    const cause =
+      error instanceof Error
+        ? ((error as Error & { cause?: unknown }).cause as Record<string, unknown> | undefined)
+        : undefined
     console.error(JSON.stringify({
       event: 'oidc_callback_failed',
       error: error instanceof Error ? error.name : 'UnknownError',
+      oauthError: typeof cause?.error === 'string' ? cause.error.slice(0, 64) : undefined,
+      oauthErrorDescription:
+        typeof cause?.error_description === 'string' ? cause.error_description.slice(0, 256) : undefined,
     }))
     return c.redirect(errorCode === 'OIDC_IDENTITY_CONFLICT'
       ? '/?error=identity_conflict'
