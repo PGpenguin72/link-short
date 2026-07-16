@@ -65,7 +65,7 @@ function discoveryResponse(): Response {
     response_types_supported: ['code'],
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: ['RS256'],
-    token_endpoint_auth_methods_supported: ['client_secret_basic'],
+    token_endpoint_auth_methods_supported: ['client_secret_post'],
     code_challenge_methods_supported: ['S256'],
     authorization_response_iss_parameter_supported: true,
   })
@@ -98,7 +98,7 @@ function installProviderMock(options: {
         ? init.body
         : new URLSearchParams(String(init?.body ?? ''))
       expect(body.get('client_id')).toBe(CLIENT_ID)
-      expect(body.get('client_secret')).toBeTruthy()
+      expect(body.get('client_secret')).toBe(CLIENT_SECRET)
       expect(body.get('grant_type')).toBe('authorization_code')
       expect(body.get('redirect_uri')).toBe(`${APP_BASE_URL}/api/auth/callback`)
       expect(body.get('code_verifier')).toBe(options.transaction.codeVerifier)
