@@ -16,6 +16,7 @@ Read these files before changing behavior:
 - `schema.sql`: complete schema for a fresh database.
 - `migration-002.sql`: one-time migration for databases created by an older version.
 - `migration-003-pg72-oidc.sql`: existing Google/email database migration to stable PGID subjects.
+- `migration-004-email-identity.sql`: normalized-email uniqueness guard for migrated users.
 - `wrangler.toml`: Pages output directory and D1 binding.
 
 ## Commands
@@ -92,6 +93,7 @@ When adding a root-level public file such as `/robots.txt`, register it before `
 - Define concrete row types for `.first<T>()` and `.all<T>()` results.
 - `schema.sql` must remain sufficient for a fresh install.
 - Add a new numbered migration for existing production databases when changing schema. Do not rewrite an already-applied migration.
+- Keep normalized email unique so verified-email legacy binding can never choose between multiple rows.
 - Keep `slug` unique and preserve the existing allowed format: letters, numbers, `_`, and `-`.
 - Link targets must use only the `http:` or `https:` scheme.
 - A link redirects only when `links.active = 1` and its owner is not banned.

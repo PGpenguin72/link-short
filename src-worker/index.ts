@@ -82,9 +82,59 @@ async function loadUser(c: Ctx): Promise<SessionUser | null> {
 
 type UserRow = {
   email: string
-  sso_subject: string
+  sso_subject: string | null
   banned: number
   is_admin: number
+}
+
+type BoundUserRow = UserRow & { sso_subject: string }
+
+const ALLOWED_OAUTH_ERROR_CODES = new Set([
+  'access_denied',
+  'account_selection_required',
+  'consent_required',
+  'interaction_required',
+  'invalid_client',
+  'invalid_grant',
+  'invalid_request',
+  'invalid_request_object',
+  'invalid_request_uri',
+  'invalid_scope',
+  'invalid_target',
+  'login_required',
+  'registration_not_supported',
+  'request_not_supported',
+  'request_uri_not_supported',
+  'server_error',
+  'temporarily_unavailable',
+  'unauthorized_client',
+  'unsupported_grant_type',
+  'unsupported_response_type',
+])
+
+function allowlistedOAuthError(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  try {
+    const direct = (error as { error?: unknown }).error
+    const cause = (error as { cause?: unknown }).cause
+    const nested = cause && typeof cause === 'object'
+      ? (cause as { error?: unknown }).error
+      : undefined
+    const candidate = typeof direct === 'string' ? direct : nested
+    return typeof candidate === 'string' && ALLOWED_OAUTH_ERROR_CODES.has(candidate)
+      ? candidate
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function logOidcCallbackFailure(error: unknown): void {
+  const oauthError = allowlistedOAuthError(error)
+  console.error(JSON.stringify({
+    event: 'oidc_callback_failed',
+    ...(oauthError ? { oauthError } : {}),
+  }))
 }
 
 export function normalizeEmail(email: string): string {
@@ -97,9 +147,9 @@ export function normalizeEmail(email: string): string {
 
 async function applyAdminBootstrap(
   env: Pick<Env, 'DB' | 'BOOTSTRAP_ADMIN_EMAIL'>,
-  user: UserRow,
+  user: BoundUserRow,
   verifiedEmail: string,
-): Promise<UserRow> {
+): Promise<BoundUserRow> {
   if (user.is_admin === 1) {
     await env.DB.prepare(
       `INSERT OR IGNORE INTO auth_bootstrap (id, admin_subject, completed_at)
@@ -133,46 +183,51 @@ async function applyAdminBootstrap(
   return (await env.DB.prepare(
     `SELECT email, sso_subject, banned, is_admin
      FROM users WHERE sso_subject = ?`
-  ).bind(user.sso_subject).first<UserRow>()) ?? user
+  ).bind(user.sso_subject).first<BoundUserRow>()) ?? user
 }
 
 export async function resolveOidcUser(
   env: Pick<Env, 'DB' | 'BOOTSTRAP_ADMIN_EMAIL'>,
   subject: string,
   email: string,
-): Promise<UserRow> {
+): Promise<BoundUserRow> {
   const verifiedEmail = normalizeEmail(email)
   const existingSubject = await env.DB.prepare(
     `SELECT email, sso_subject, banned, is_admin
      FROM users WHERE sso_subject = ?`
-  ).bind(subject).first<UserRow>()
+  ).bind(subject).first<BoundUserRow>()
   if (existingSubject) return existingSubject
 
-  try {
-    const bound = await env.DB.prepare(
-      `UPDATE users SET sso_subject = ?
-       WHERE email = (
-         SELECT email FROM users
-         WHERE lower(email) = ? AND sso_subject IS NULL
-         ORDER BY created_at ASC LIMIT 1
-       ) AND sso_subject IS NULL
-       RETURNING email, sso_subject, banned, is_admin`
-    ).bind(subject, verifiedEmail).first<UserRow>()
-    if (bound) return applyAdminBootstrap(env, bound, verifiedEmail)
-  } catch {
+  const { results: emailMatches } = await env.DB.prepare(
+    `SELECT email, sso_subject, banned, is_admin
+     FROM users WHERE lower(email) = ?`
+  ).bind(verifiedEmail).all<UserRow>()
+  if (emailMatches.length > 1) throw new Error('OIDC_IDENTITY_CONFLICT')
+
+  const emailOwner = emailMatches[0]
+  if (emailOwner) {
+    if (emailOwner.sso_subject !== null) throw new Error('OIDC_IDENTITY_CONFLICT')
+    try {
+      const bound = await env.DB.prepare(
+        `UPDATE users SET sso_subject = ?
+         WHERE email = ? AND sso_subject IS NULL
+         RETURNING email, sso_subject, banned, is_admin`
+      ).bind(subject, emailOwner.email).first<BoundUserRow>()
+      if (bound) return applyAdminBootstrap(env, bound, verifiedEmail)
+    } catch {
+      const concurrent = await env.DB.prepare(
+        `SELECT email, sso_subject, banned, is_admin
+         FROM users WHERE sso_subject = ?`
+      ).bind(subject).first<BoundUserRow>()
+      if (concurrent) return concurrent
+      throw new Error('OIDC_IDENTITY_CONFLICT')
+    }
+
     const concurrent = await env.DB.prepare(
       `SELECT email, sso_subject, banned, is_admin
        FROM users WHERE sso_subject = ?`
-    ).bind(subject).first<UserRow>()
+    ).bind(subject).first<BoundUserRow>()
     if (concurrent) return concurrent
-    throw new Error('OIDC_IDENTITY_CONFLICT')
-  }
-
-  const emailOwner = await env.DB.prepare(
-    `SELECT email, sso_subject, banned, is_admin
-     FROM users WHERE lower(email) = ? LIMIT 1`
-  ).bind(verifiedEmail).first<UserRow>()
-  if (emailOwner?.sso_subject && emailOwner.sso_subject !== subject) {
     throw new Error('OIDC_IDENTITY_CONFLICT')
   }
 
@@ -181,17 +236,43 @@ export async function resolveOidcUser(
       `INSERT INTO users (email, sso_subject, banned, is_admin)
        VALUES (?, ?, 0, 0)
        RETURNING email, sso_subject, banned, is_admin`
-    ).bind(verifiedEmail, subject).first<UserRow>()
+    ).bind(verifiedEmail, subject).first<BoundUserRow>()
     if (!inserted) throw new Error('OIDC_USER_CREATE_FAILED')
     return applyAdminBootstrap(env, inserted, verifiedEmail)
   } catch {
     const concurrent = await env.DB.prepare(
       `SELECT email, sso_subject, banned, is_admin
        FROM users WHERE sso_subject = ?`
-    ).bind(subject).first<UserRow>()
+    ).bind(subject).first<BoundUserRow>()
     if (concurrent) return concurrent
     throw new Error('OIDC_IDENTITY_CONFLICT')
   }
+}
+
+export async function setUserBanned(
+  env: Pick<Env, 'DB'>,
+  email: string,
+  banned: boolean,
+): Promise<'not_found' | 'admin_protected' | 'updated'> {
+  const exactEmail = email.trim()
+  normalizeEmail(exactEmail)
+  const target = await env.DB.prepare(
+    `SELECT sso_subject, is_admin FROM users WHERE email = ?`
+  ).bind(exactEmail).first<{ sso_subject: string | null; is_admin: number }>()
+  if (!target) return 'not_found'
+  if (target.is_admin === 1) return 'admin_protected'
+
+  const statements = [
+    env.DB.prepare('UPDATE users SET banned = ? WHERE email = ?')
+      .bind(banned ? 1 : 0, exactEmail),
+  ]
+  if (banned && target.sso_subject) {
+    statements.push(
+      env.DB.prepare('DELETE FROM sessions WHERE sso_subject = ?').bind(target.sso_subject),
+    )
+  }
+  await env.DB.batch(statements)
+  return 'updated'
 }
 
 // ── Auth gate for all /api/links + /api/admin routes ─────────────────────────────
@@ -292,17 +373,7 @@ app.get('/api/auth/callback', async (c) => {
     return c.redirect(user.is_admin === 1 ? '/admin' : '/dashboard')
   } catch (error) {
     const errorCode = error instanceof Error ? error.message : ''
-    const cause =
-      error instanceof Error
-        ? ((error as Error & { cause?: unknown }).cause as Record<string, unknown> | undefined)
-        : undefined
-    console.error(JSON.stringify({
-      event: 'oidc_callback_failed',
-      error: error instanceof Error ? error.name : 'UnknownError',
-      oauthError: typeof cause?.error === 'string' ? cause.error.slice(0, 64) : undefined,
-      oauthErrorDescription:
-        typeof cause?.error_description === 'string' ? cause.error_description.slice(0, 256) : undefined,
-    }))
+    logOidcCallbackFailure(error)
     return c.redirect(errorCode === 'OIDC_IDENTITY_CONFLICT'
       ? '/?error=identity_conflict'
       : '/?error=auth_failed')
@@ -442,25 +513,20 @@ app.get('/api/admin/users', async (c) => {
 // Ban / unban a user
 app.post('/api/admin/users/:email/ban', async (c) => {
   if (!requireAdmin(c)) return c.json({ error: '沒有權限' }, 403)
-  const email = normalizeEmail(decodeURIComponent(c.req.param('email')))
   const { banned } = await c.req.json<{ banned: boolean }>()
+  if (typeof banned !== 'boolean') return c.json({ error: '無效的停權狀態' }, 400)
 
-  const target = await c.env.DB.prepare(
-    `SELECT sso_subject, is_admin FROM users WHERE lower(email) = ?`
-  ).bind(email).first<{ sso_subject: string | null; is_admin: number }>()
-  if (!target) return c.json({ error: '找不到此帳號' }, 404)
-  if (target.is_admin === 1) return c.json({ error: '無法停權管理員帳號' }, 400)
-
-  const statements = [
-    c.env.DB.prepare('UPDATE users SET banned = ? WHERE lower(email) = ?')
-      .bind(banned ? 1 : 0, email),
-  ]
-  if (banned && target.sso_subject) {
-    statements.push(
-      c.env.DB.prepare('DELETE FROM sessions WHERE sso_subject = ?').bind(target.sso_subject),
-    )
+  let email: string
+  try {
+    email = decodeURIComponent(c.req.param('email')).trim()
+    normalizeEmail(email)
+  } catch {
+    return c.json({ error: '無效的帳號' }, 400)
   }
-  await c.env.DB.batch(statements)
+
+  const result = await setUserBanned(c.env, email, banned)
+  if (result === 'not_found') return c.json({ error: '找不到此帳號' }, 404)
+  if (result === 'admin_protected') return c.json({ error: '無法停權管理員帳號' }, 400)
   return c.json({ ok: true })
 })
 

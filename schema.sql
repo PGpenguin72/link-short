@@ -34,5 +34,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_links_slug ON links(slug);
 CREATE INDEX IF NOT EXISTS idx_links_owner ON links(owner_email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_normalized ON users(lower(email));
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_subject ON sessions(sso_subject);

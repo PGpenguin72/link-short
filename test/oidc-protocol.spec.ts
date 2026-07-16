@@ -1,5 +1,8 @@
 import * as oauth from 'oauth4webapi'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { Miniflare } from 'miniflare'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import worker, { logOidcCallbackFailure } from '../src-worker/index'
 import {
   createAuthorizationRequest,
   decodeOidcTransaction,
@@ -83,11 +86,14 @@ function installProviderMock(options: {
   audience?: string
   nonce?: string
   onTokenRequest?: () => void
+  rejectReplayWith?: string
 }) {
+  let tokenRequests = 0
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = requestUrl(input)
     if (url.pathname === '/.well-known/openid-configuration') return discoveryResponse()
     if (url.pathname === '/oauth2/token') {
+      tokenRequests += 1
       options.onTokenRequest?.()
       const headers = new Headers(init?.headers)
       // ClientSecretPost: credentials travel in the body, not a Basic header,
@@ -104,6 +110,13 @@ function installProviderMock(options: {
       expect(body.get('code_verifier')).toBe(options.transaction.codeVerifier)
       expect(await oauth.calculatePKCECodeChallenge(body.get('code_verifier') ?? ''))
         .toBe(options.codeChallenge)
+      if (tokenRequests > 1 && options.rejectReplayWith) {
+        return Response.json({
+          error: 'invalid_grant',
+          error_description: options.rejectReplayWith,
+          error_uri: 'https://sso-preview.test/errors?code=replayed-secret-code',
+        }, { status: 400, headers: { 'Cache-Control': 'no-store' } })
+      }
       return Response.json({
         access_token: 'pg72_at_protocol_test',
         token_type: 'Bearer',
@@ -129,6 +142,21 @@ function installProviderMock(options: {
   })
 }
 
+function d1ExecScript(sql: string): string {
+  return sql
+    .replace(/^\s*--.*$/gm, '')
+    .split(';')
+    .map((statement) => statement.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .map((statement) => `${statement};`)
+    .join('\n')
+}
+
+const ctx = {
+  waitUntil() {},
+  passThroughOnException() {},
+} as unknown as ExecutionContext
+
 beforeAll(async () => {
   signingKeys = await crypto.subtle.generateKey(
     {
@@ -141,6 +169,10 @@ beforeAll(async () => {
     ['sign', 'verify'],
   )
   publicJwk = await crypto.subtle.exportKey('jwk', signingKeys.publicKey)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('PG72 ID OIDC protocol', () => {
@@ -222,5 +254,91 @@ describe('PG72 ID OIDC protocol', () => {
 
     await expect(processAuthorizationCallback(env, callback.href, transaction)).rejects.toThrow()
     vi.restoreAllMocks()
+  })
+
+  it('rejects a replayed callback without logging provider descriptions or raw values', async () => {
+    const miniflare = new Miniflare({
+      compatibilityDate: '2026-07-10',
+      modules: true,
+      script: 'export default { fetch() { return new Response(null) } }',
+      d1Databases: { DB: 'callback-replay-test' },
+    })
+    try {
+      const database = await miniflare.getD1Database('DB') as unknown as D1Database
+      const schema = await readFile(new URL('../schema.sql', import.meta.url), 'utf8')
+      await database.exec(d1ExecScript(schema))
+
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(discoveryResponse())
+      const { authorizationUrl, transaction } = await createAuthorizationRequest(env)
+      vi.restoreAllMocks()
+
+      const sensitiveDescription = [
+        'replay rejected',
+        'victim@example.test',
+        'pg72_at_should_never_be_logged',
+        'authorization_code=private-code',
+      ].join('\n')
+      let tokenRequests = 0
+      installProviderMock({
+        transaction,
+        codeChallenge: authorizationUrl.searchParams.get('code_challenge') ?? '',
+        rejectReplayWith: sensitiveDescription,
+        onTokenRequest: () => { tokenRequests += 1 },
+      })
+      const callback = new URL('/api/auth/callback', APP_BASE_URL)
+      callback.searchParams.set('code', 'authorization-code')
+      callback.searchParams.set('state', transaction.state)
+      callback.searchParams.set('iss', ISSUER)
+      const encodedTransaction = await encodeOidcTransaction(transaction, CLIENT_SECRET)
+      const callbackRequest = () => new Request(callback, {
+        headers: { cookie: `__Host-link_oidc=${encodedTransaction}` },
+      })
+      const workerEnv = {
+        ...env,
+        DB: database,
+        ASSETS: { fetch: () => new Response('unused') },
+      } as never
+
+      const first = await worker.fetch(callbackRequest(), workerEnv, ctx)
+      expect(first.status).toBe(302)
+      expect(first.headers.get('location')).toBe('/dashboard')
+      const firstSessionCount = await database.prepare(
+        'SELECT COUNT(*) AS count FROM sessions',
+      ).first<{ count: number }>()
+      expect(firstSessionCount?.count).toBe(1)
+
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const replay = await worker.fetch(callbackRequest(), workerEnv, ctx)
+      expect(replay.status).toBe(302)
+      expect(replay.headers.get('location')).toBe('/?error=auth_failed')
+      expect(tokenRequests).toBe(2)
+      const replaySessionCount = await database.prepare(
+        'SELECT COUNT(*) AS count FROM sessions',
+      ).first<{ count: number }>()
+      expect(replaySessionCount?.count).toBe(1)
+
+      expect(errorLog).toHaveBeenCalledTimes(1)
+      const serializedLog = String(errorLog.mock.calls[0]?.[0])
+      expect(serializedLog).toBe(
+        '{"event":"oidc_callback_failed","oauthError":"invalid_grant"}',
+      )
+      expect(serializedLog).not.toContain('\n')
+      expect(serializedLog).not.toContain('victim@example.test')
+      expect(serializedLog).not.toContain('pg72_at_should_never_be_logged')
+      expect(serializedLog).not.toContain('authorization_code')
+      expect(serializedLog).not.toContain('error_uri')
+    } finally {
+      await miniflare.dispose()
+    }
+  })
+
+  it('logs only a generic callback event for unrecognized provider errors', () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    logOidcCallbackFailure({
+      error: 'unknown_error\nprivate-token',
+      error_description: 'victim@example.test',
+      error_uri: 'https://sso-preview.test/private',
+    })
+    expect(errorLog).toHaveBeenCalledWith('{"event":"oidc_callback_failed"}')
   })
 })

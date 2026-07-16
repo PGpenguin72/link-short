@@ -13,8 +13,10 @@
     "db:create": "wrangler d1 create link-short-db",
     "db:migrate:local": "wrangler d1 execute link-short-db --local --file=schema.sql",
     "db:migrate:oidc:local": "wrangler d1 execute link-short-db --local --file=migration-003-pg72-oidc.sql",
+    "db:migrate:email-identity:local": "wrangler d1 execute link-short-db --local --file=migration-004-email-identity.sql",
     "db:migrate": "wrangler d1 execute link-short-db --remote --file=schema.sql",
     "db:migrate:oidc": "wrangler d1 execute link-short-db --remote --file=migration-003-pg72-oidc.sql",
+    "db:migrate:email-identity": "wrangler d1 execute link-short-db --remote --file=migration-004-email-identity.sql",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=link-short"
   },
   "dependencies": {

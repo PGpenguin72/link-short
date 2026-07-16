@@ -106,6 +106,8 @@ sequenceDiagram
 ├── src-worker/index.ts         # Hono Worker、API、OAuth、轉址
 ├── schema.sql                  # 新資料庫完整 schema
 ├── migration-002.sql           # 舊版資料庫升級檔
+├── migration-003-pg72-oidc.sql # PGID stable-sub 身分遷移
+├── migration-004-email-identity.sql # normalized email 唯一性 guard
 ├── wrangler.toml               # Pages 與 D1 綁定
 ├── .dev.vars.example           # 本機環境變數範本
 ├── index.html                  # SPA 入口與根目錄 OG meta
@@ -207,7 +209,7 @@ npm run db:create
 npm run db:migrate
 ```
 
-只有舊版資料庫才執行 `migration-002.sql`。從現有 Google/email 身分升級時，再執行 `migration-003-pg72-oidc.sql`；這個 migration 會刻意刪除舊 Session，但不會刪除使用者或短網址。
+只有舊版資料庫才執行 `migration-002.sql`。從現有 Google/email 身分升級時，依序執行 `migration-003-pg72-oidc.sql` 與 `migration-004-email-identity.sql`；前者會刻意刪除舊 Session，但不會刪除使用者或短網址。`migration-004` 會在 legacy 資料含有只差大小寫的重複 email 時 fail closed，必須先由 owner 釐清帳號與連結歸屬，不能任選一列合併。
 
 ### 3. 設定 Pages
 
