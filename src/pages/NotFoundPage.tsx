@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 export default function NotFoundPage() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-950 flex items-center justify-center px-4">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#020203] via-[#0b0c1c] to-[#020203] flex items-center justify-center px-4">
       {/* Stars */}
       <div className="pointer-events-none absolute inset-0">
         {STARS.map((s, i) => (
@@ -32,18 +32,18 @@ export default function NotFoundPage() {
           <Astronaut />
         </div>
 
-        <h1 className="text-7xl font-black tracking-tight bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-pulse-slow">
+        <h1 className="text-7xl font-black tracking-tight bg-gradient-to-r from-[#6872d9] via-purple-400 to-pink-400 bg-clip-text text-transparent animate-pulse-slow">
           404
         </h1>
-        <h2 className="mt-2 text-xl font-bold text-white">這個連結迷失在宇宙中了</h2>
-        <p className="mt-3 text-sm text-slate-400 leading-relaxed">
+        <h2 className="mt-2 text-xl font-bold text-fg">這個連結迷失在宇宙中了</h2>
+        <p className="mt-3 text-sm text-fg-muted leading-relaxed">
           你要找的短網址不存在、已被刪除，或已被停用。<br />
           太空人正在努力尋找，但似乎飄得有點遠……
         </p>
 
         <Link
           to="/"
-          className="mt-8 inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-medium backdrop-blur transition-colors"
+          className="mt-8 inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] hover:border-accent/40 text-fg text-sm font-medium backdrop-blur transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
