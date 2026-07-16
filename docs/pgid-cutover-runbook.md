@@ -4,18 +4,18 @@
 
 - 部署形態:Cloudflare **Pages**(Advanced Mode,`dist/_worker.js`),專案名 `link-short`。
 - Production D1:binding `DB` → database `link-short-db`(`database_id: 96056517-46ea-4fdf-a38b-6544b265d682`)。
-- 對應程式版本:master `5d57435`(本機驗證已通過:`tsc` x2、13 個測試、`npm run build`)。
+- 對應程式版本:本 runbook 所在的已審核 release commit(部署前以 `git rev-parse HEAD` 記錄;本機驗證須通過 `tsc` x2、13 個測試、`npm run build`)。
 - 參照流程:Copy 已完成的切換順序 — 備份 D1 → 建 client → 設 secrets → 套 migration → 部署 → 煙霧測試。
 
 > 執行者需求:已 `wrangler login` 且對 Pages 專案 `link-short` 與 D1 `link-short-db` 有權限的帳號。
 > 標注「**Owner 親手做**」的步驟必須由 owner 操作(建 client、產生與存放 secret)。
+> 除非另有註明,以下指令均從 Link repository root 執行。
 
 ---
 
 ## 0. 前置檢查(本機,唯讀)
 
 ```bash
-cd /Users/pgpenguin72/sso.pg72.tw/原專案代碼/link.pg72.tw
 git status              # 必須 clean,HEAD 在 master
 git log -1 --oneline    # 確認要部署的 commit
 npm ci
@@ -32,7 +32,6 @@ curl -s https://sso.pg72.tw/.well-known/openid-configuration | head -c 400
 ## 1. 備份 production D1
 
 ```bash
-cd /Users/pgpenguin72/sso.pg72.tw/原專案代碼/link.pg72.tw
 mkdir -p backups
 
 # 1a. 完整 SQL 匯出(存放於 repo 外或確認不 commit;backups/ 不在版控中)
@@ -79,7 +78,7 @@ Owner 在 PGID admin UI 建立 client,欄位值如下:
 | Redirect URIs | `https://link.pg72.tw/api/auth/callback`(精確比對,production 只此一筆) |
 | Post-logout redirect URIs | 留空(Link 未實作 RP-initiated logout) |
 | End session | 停用(`enableEndSession = 0`) |
-| Token endpoint auth method | `client_secret_basic` |
+| Token endpoint auth method | `client_secret_post`(必須與 Worker 的 `oauth.ClientSecretPost` 一致,不可設為 Basic) |
 | Grant types | `authorization_code`(僅此一項,不需 refresh token) |
 | Response types | `code` |
 | Scopes | `openid`、`email`(Worker 固定請求 `openid email`,需要 UserInfo 回傳 `email` 與 `email_verified`) |
@@ -98,7 +97,6 @@ Pages 的 `vars`(`APP_BASE_URL`、`PG72_ID_ISSUER`、`PG72_ID_CLIENT_ID=pg72-lin
 只需設定 secret:
 
 ```bash
-cd /Users/pgpenguin72/sso.pg72.tw/原專案代碼/link.pg72.tw
 npx wrangler pages secret put PG72_ID_CLIENT_SECRET --project-name=link-short
 # 提示時貼入步驟 2 的 client secret(此值同時是 OIDC transaction cookie 的 HMAC key)
 ```
@@ -110,7 +108,6 @@ npx wrangler pages secret put PG72_ID_CLIENT_SECRET --project-name=link-short
 只套 `migration-003-pg72-oidc.sql`。**不要**對既有 production 執行 `schema.sql`(那是全新安裝用)。
 
 ```bash
-cd /Users/pgpenguin72/sso.pg72.tw/原專案代碼/link.pg72.tw
 npm run db:migrate:oidc
 # = npx wrangler d1 execute link-short-db --remote --file=migration-003-pg72-oidc.sql
 ```
@@ -137,7 +134,6 @@ npx wrangler d1 execute link-short-db --remote --command \
 ## 5. 部署
 
 ```bash
-cd /Users/pgpenguin72/sso.pg72.tw/原專案代碼/link.pg72.tw
 npm run deploy
 # = npm run build && npx wrangler pages deploy dist --project-name=link-short
 ```

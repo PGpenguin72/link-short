@@ -185,7 +185,7 @@ npm run build
 
 ### 1. 註冊 PGID OIDC clients
 
-Link 使用 confidential client、`client_secret_basic`、Authorization Code、PKCE S256，scopes 為 `openid email`，且不可略過 consent。註冊以下 redirect URIs：
+Link 使用 confidential client、`client_secret_post`、Authorization Code、PKCE S256，scopes 為 `openid email`，且不可略過 consent。註冊以下 redirect URIs：
 
 ```text
 https://link.pg72.tw/api/auth/callback
