@@ -48,21 +48,30 @@
 - 主要操作頁。header/新增卡/清單卡改 `.card`、`.btn-primary`/`.btn-secondary`/`.input`、accent icon glow、token 色、`.label-mono` 區塊小標、hover/focus 對齊 expo-out。
 - 保留所有 state、handler、API 呼叫、confirm/clipboard 行為與 DOM 結構。
 
-### Step 4 — AdminPage ✅
+### Step 4 — AdminPage ✅（`bf9ef57`）
 
 - 管理後台。header/tab/表格卡改 token 與 component 類別、狀態 badge 對齊 accent 語彙、`.btn-secondary` 登出、hover row token 化。
+- 前次 session 於 users table 中斷（API 503），本次接手檢視半成品可用，補完：兩個空表 row、admin dash `text-fg-subtle`、`TabButton` token 化（active `bg-white/[0.08]`）。
 - 保留 tab 切換、prompt/confirm、adminApi 呼叫、資料流。
 
-### Step 5 — QRModal + NotFoundPage ✅
+### Step 5 — QRModal + NotFoundPage ✅（`80581fb`）
 
-- QRModal:overlay/卡片/按鈕 token 化，QR 本體保持白底（掃描需求）。
-- NotFoundPage:底色對齊近黑 `#050506`/deep，返回鈕改 token，保留太空人與星空動畫（本頁刻意保留趣味性,僅對齊底色與 accent）。
+- QRModal:卡片改 `.card`、關閉鈕/次要鈕 token 化，URL 改 accent，分享主鈕 `bg-accent` + glow；QR 本體保持白底（掃描需求）。
+- NotFoundPage:背景漸層對齊 `#020203`/`#0b0c1c` 深底，404 漸層起點改 accent-bright `#6872d9`，文字與返回鈕 token 化（hover `border-accent/40`），保留太空人與星空動畫（本頁刻意保留趣味性；`via-purple-400 to-pink-400` 為刻意殘留）。
 
-> commit hashes 見交接回報 / `git log`。每步都跑 build 驗證。
+## Commit 清單（本輪視覺重塑）
 
-## 驗證彙整
+- `c08b3c8` Add morden_dark design tokens and theme foundation（Step 1）
+- `6f5812b` Restyle LoginPage to morden_dark（Step 2）
+- `d8d66d4` Restyle DashboardPage to morden_dark（Step 3）
+- `bf9ef57` Restyle AdminPage to morden_dark（Step 4）
+- `80581fb` Restyle QRModal and NotFoundPage to morden_dark（Step 5）
 
-- `npm run build`（vite + esbuild worker）:通過。
-- `npx tsc --noEmit`（app + worker tsconfig）:通過。
-- `npm test`（vitest）:見最終回報。
-- 未部署（依規則交主線）。
+## 驗證彙整（2026-07-16 完成時）
+
+- `npm run check`（tsc app + tsc worker + vitest + build）:通過。
+- `npm test`:4 files / 13 tests 全數通過（含 OIDC protocol、identity、route security tests）。
+- `npm run build`（vite + esbuild worker）:通過，CSS 28.99KB。
+- 殘留掃描:`src/` 已無 slate-*/blue-*/purple-* 硬編碼（僅 404 標題趣味漸層刻意保留）。
+- 未動 `src/api.ts`、`src-worker/`、路由與 auth 邏輯；token endpoint 維持 ClientSecretPost 未觸碰。
+- 未 push、未部署（依規則交 owner 決定）。
