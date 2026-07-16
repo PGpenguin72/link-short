@@ -298,14 +298,14 @@ function requireAdmin(c: Ctx): boolean {
   return c.get('user')?.is_admin === true
 }
 
+app.use('/api/*', async (c, next) => {
+  c.header('Cache-Control', 'no-store')
+  c.header('Pragma', 'no-cache')
+  await next()
+})
 app.use('/api/links/*', mutationOriginMiddleware, authMiddleware)
 app.use('/api/links', mutationOriginMiddleware, authMiddleware)
 app.use('/api/admin/*', mutationOriginMiddleware, authMiddleware)
-app.use('/api/auth/*', async (c, next) => {
-  await next()
-  c.header('Cache-Control', 'no-store')
-  c.header('Pragma', 'no-cache')
-})
 
 // ── Auth: me ─────────────────────────────────────────────────────────────────
 app.get('/api/auth/me', async (c) => {
@@ -572,6 +572,8 @@ app.put('/api/admin/links/:id', async (c) => {
     throw e
   }
 })
+
+app.all('/api/*', (c) => c.json({ error: 'Not Found' }, 404))
 
 // ── Short URL redirect ───────────────────────────────────────────────────────
 // Root-level public files would otherwise be mistaken for short-link slugs.

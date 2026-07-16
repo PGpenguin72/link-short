@@ -116,7 +116,7 @@ sequenceDiagram
 
 ## 使用需求
 
-- Node.js 20 或更新版本
+- Node.js 22 或更新版本
 - npm
 - Cloudflare 帳號與 Pages 專案
 - Cloudflare D1 資料庫
@@ -219,7 +219,7 @@ Cloudflare Pages 專案使用以下設定：
 | --- | --- |
 | Build command | `npm run build` |
 | Build output directory | `dist` |
-| D1 binding | `DB` → `link-short-db` |
+| D1 binding | Production: `DB` → `link-short-db`; Preview 必須使用獨立資料庫 |
 
 在 Settings → Variables and Secrets 加入：
 
@@ -231,7 +231,16 @@ Cloudflare Pages 專案使用以下設定：
 | `PG72_ID_CLIENT_SECRET` | Secret | 該環境的 OIDC client secret |
 | `BOOTSTRAP_ADMIN_EMAIL` | 變數或 Secret | 可選，僅限空資料庫的一次管理員 bootstrap |
 
-Preview 環境固定使用 `https://link-preview.pg72.tw`、`https://sso-preview.pg72.tw` 與 `pg72-link-preview`。Preview 必須另外建立 D1 並將 `DB` 綁定到該資料庫；不要讓 Preview 共用正式 `link-short-db`。`wrangler.toml` 刻意不將 Preview DB 指向正式 UUID。
+Preview 環境固定使用 `https://link-preview.pg72.tw`、`https://sso-preview.pg72.tw` 與 `pg72-link-preview`。`env.preview` 不得使用 production D1。Owner 必須先建立獨立 Preview D1，再把指令回傳的真實名稱與 ID 寫進 `wrangler.toml`：
+
+```toml
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "<OWNER_PROVISIONED_PREVIEW_DATABASE_NAME>"
+database_id = "<OWNER_PROVISIONED_PREVIEW_DATABASE_ID>"
+```
+
+以上是填寫格式，不可把 placeholder 原樣放進有效設定，也不可代入 production UUID。實際的 `env.preview.d1_databases` 尚未由 owner 建立並寫入前，Preview 部署維持 **NO-GO**；Dashboard-only binding 不能取代 repo 內的 Wrangler source of truth。
 
 完成後可透過 Cloudflare Git 整合部署，或在已登入 Wrangler 的環境執行：
 
@@ -257,6 +266,8 @@ npm run deploy
 | `POST` | `/api/admin/links/:id/disable` | 管理員 | 停用或啟用連結 |
 | `PUT` | `/api/admin/links/:id` | 管理員 | 編輯任意連結 |
 | `GET`, `HEAD` | `/:slug` | 公開 | 查詢並 `302` 轉址到目標 |
+
+所有 `/api/*` 回應都帶 `Cache-Control: no-store`；未知 API 路徑固定回 JSON `404`，不會落入 SPA 或短網址路由。
 
 ## 資料表
 

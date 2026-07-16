@@ -14,9 +14,10 @@ database_name = "link-short-db"
 # Replace with your actual database ID after running: npm run db:create
 database_id = "96056517-46ea-4fdf-a38b-6544b265d682"
 
-# Preview must use a separate D1 binding configured in the Pages Preview
-# environment. No preview database exists yet, so this file intentionally does
-# not point Preview at the production database.
+# DEPLOY BLOCKER: Preview needs its own owner-provisioned D1. After provisioning,
+# add the real [[env.preview.d1_databases]] binding here; environment-scoped
+# configuration must not point at the production database or rely only on a
+# dashboard binding.
 [env.preview.vars]
 APP_BASE_URL = "https://link-preview.pg72.tw"
 PG72_ID_ISSUER = "https://sso-preview.pg72.tw"

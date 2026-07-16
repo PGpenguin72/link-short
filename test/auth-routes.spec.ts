@@ -56,4 +56,27 @@ describe('auth route cookie handling', () => {
     )
     expect(response.status).toBe(403)
   })
+
+  it('marks non-auth API responses as non-cacheable', async () => {
+    const response = await worker.fetch(
+      new Request('https://link-preview.test/api/links'),
+      env,
+      ctx,
+    )
+    expect(response.status).toBe(401)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('pragma')).toBe('no-cache')
+  })
+
+  it('returns a non-cacheable JSON 404 for an unknown API route', async () => {
+    const response = await worker.fetch(
+      new Request('https://link-preview.test/api/unknown'),
+      env,
+      ctx,
+    )
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    await expect(response.json()).resolves.toEqual({ error: 'Not Found' })
+  })
 })

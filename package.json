@@ -2,6 +2,9 @@
   "name": "link-short",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build:worker": "esbuild src-worker/index.ts --bundle --outfile=dist/_worker.js --format=esm --platform=browser --target=es2022 --external:node:*",

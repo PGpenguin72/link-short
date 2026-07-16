@@ -53,12 +53,14 @@ Cloudflare Pages sees `_worker.js` and runs it in Advanced Mode. The Worker must
 
 Routes in `src-worker/index.ts` are order-sensitive:
 
-1. `/api/auth/*` handles authentication.
-2. `/api/links*` requires an authenticated, non-banned user.
-3. `/api/admin/*` also requires `user.is_admin` inside each handler.
-4. Root-level brand assets are forwarded to `ASSETS` before slug matching.
-5. `GET` and `HEAD /:slug` query D1 and redirect valid links.
-6. `app.all('*')` forwards all remaining requests to the React assets and must remain last.
+1. `/api/*` receives non-cacheable response headers.
+2. `/api/auth/*` handles authentication.
+3. `/api/links*` requires an authenticated, non-banned user.
+4. `/api/admin/*` also requires `user.is_admin` inside each handler.
+5. Unmatched `/api/*` requests return a JSON 404 before asset or slug matching.
+6. Root-level brand assets are forwarded to `ASSETS` before slug matching.
+7. `GET` and `HEAD /:slug` query D1 and redirect valid links.
+8. `app.all('*')` forwards all remaining requests to the React assets and must remain last.
 
 When adding a top-level React route, also add its first path segment to `RESERVED`. Otherwise the Worker may treat it as a short code. Reserved checks are case-insensitive when validating new short codes.
 

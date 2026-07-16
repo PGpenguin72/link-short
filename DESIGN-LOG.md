@@ -1,6 +1,6 @@
 # DESIGN-LOG — link.pg72.tw morden_dark 視覺統一
 
-目標:把 link.pg72.tw 前端視覺統一到 `morden_dark`（Linear / Modern 深色系），依 `docs/design-system.md`（權威來源 `../../morden_dark.txt`）。
+目標:把 link.pg72.tw 前端視覺統一到 `morden_dark`（Linear / Modern 深色系）。目前實作的 token source of truth 是 `src/index.css`；調整主題時以該檔案為準。
 
 ## 嚴格邊界
 
