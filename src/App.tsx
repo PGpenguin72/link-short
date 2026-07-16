@@ -19,8 +19,8 @@ export default function App() {
 
   if (user === undefined) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="text-slate-400 text-sm">載入中…</div>
+      <div className="app-bg min-h-screen bg-bg-base flex items-center justify-center">
+        <div className="text-fg-muted text-sm">載入中…</div>
       </div>
     )
   }
